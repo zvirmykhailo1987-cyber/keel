@@ -638,6 +638,47 @@ class TestBypassResearch(unittest.TestCase):
         text = f'a = "x" + "y"\nb = 1\nc = 2\nk = "{AWS[:4]}" + "{AWS[4:]}"\n'
         self.assertEqual([(f.line, f.type) for f in secretscan.scan_text(text)], [(4, "aws-access-key (split)")])
 
+    # --- знахідки security-рецензії (18.11.2026) ---
+    def test_padding_cannot_buy_a_timeout(self):
+        """Таймаут хука Claude Code вважає дозволом: склейки літералів мають лишатися лінійними."""
+        import time
+        payload = "'\"\" " * 36000
+        start = time.monotonic()
+        self.assertEqual(self.bash(f": {payload}; gh api -X PUT repos/o/r/contents/a.txt -f content=x"), 2)
+        self.assertLess(time.monotonic() - start, 10)
+
+    def test_slow_check_becomes_a_block(self):
+        """Внутрішній дедлайн: якщо перевірка запису не встигла, це блок; якщо читання, пропуск."""
+        import sys
+        code = ("import io, json, sys, time; from pathlib import Path; from keel import guard; from keel.paths import Vault;"
+                "guard.DEADLINE_SECONDS = 0.5; guard.decide = lambda p, v: time.sleep(10);"
+                "sys.exit(guard.main(io.StringIO(sys.argv[1]), Vault(Path(sys.argv[2])), deadline=True))")
+        engine = str(Path(guard.__file__).resolve().parents[1])
+        for payload, expected in (({"tool_name": "Write", "tool_input": {"file_path": "a.py", "content": "x"}}, 2),
+                                  ({"tool_name": "Bash", "tool_input": {"command": "ls"}}, 0)):
+            done = subprocess.run([sys.executable, "-c", code, json.dumps(payload), str(self.vault.root)],
+                                  capture_output=True, timeout=30, env={**__import__("os").environ, "PYTHONPATH": engine})
+            self.assertEqual(done.returncode, expected, done.stderr)
+
+    def test_hooks_dir_cannot_be_removed_by_other_spellings(self):
+        git(self.repo, "config", "core.hooksPath", ".husky")
+        hook = self.repo / ".husky" / "reference-transaction"
+        hook.parent.mkdir()
+        hook.write_text("#!/bin/sh\n# keel-managed: test\n", encoding="utf-8")
+        for command in ("rm .husky/reference-transacti?n", "rm -rf .husky", "mv .husky old", "rm -r .hus*",
+                        "Remove-Item -Recurse .husky"):
+            self.assertEqual(self.bash(command), 2, command)
+        self.assertEqual(self.mcp("mcp__fs__move_file", source=str(self.repo / ".husky"), destination=str(self.tmp / "o")), 2)
+        for command in ("rm -rf build", "mv a.txt b.txt", "rm .husky/notes.md", "cp a.txt ."):
+            self.assertEqual(self.bash(command), 0, command)
+
+    def test_git_apply_reverse_reads_removed_lines(self):
+        patch = self.tmp / "p.patch"
+        patch.write_text(f"--- a/s.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-T = '{GH}'\n", encoding="utf-8")
+        self.assertEqual(self.bash(f"git apply -R --index {patch.as_posix()} && git commit -m x"), 2)
+        self.assertEqual(self.bash(f"git apply --reverse --index {patch.as_posix()} && git commit -m x"), 2)
+        self.assertEqual(self.bash(f"git apply --index {patch.as_posix()} && git commit -m x"), 0, "видалення ключа не блокуємо")
+
     def test_padding_does_not_hide_commit(self):  # №18: deny-правила CC деградують після 50 підкоманд, хук ні
         self.dirty_worktree()
         self.assertEqual(self.bash("true && " * 60 + "git add . && git commit -m x"), 2)

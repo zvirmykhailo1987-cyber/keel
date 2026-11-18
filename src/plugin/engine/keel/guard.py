@@ -182,6 +182,52 @@ def _touches_keel_hook(text: str, cwd: Path) -> bool:
     return False
 
 
+_DESTROYERS = re.compile(r"(?i)\b(?:rm|rmdir|rd|del|erase|mv|move|ren|rename|Remove-Item|ri|Move-Item|Rename-Item)\b")
+
+
+def _keel_hooks_dir(cwd: Path) -> Path | None:
+    """Тека core.hooksPath усередині репозиторію, де стоїть хук Keel. .git/hooks уже захищено шляхом."""
+    from .project import HOOKS, hooks_dir  # noqa: PLC0415 - git-виклик лише для команд, що щось видаляють
+    directory = hooks_dir(cwd)
+    if directory is None or ".git" in {part.casefold() for part in directory.parts}:
+        return None
+    return directory if any(_is_keel_hook(directory / name) for name in HOOKS) else None
+
+
+def _destroys_hooks_dir(text: str, cwd: Path) -> bool:
+    """`rm -rf .husky`, `mv .husky old`, `rm .husky/reference-transacti?n`: прибрати рубіж L3 можна й без його імені."""
+    if not _DESTROYERS.search(text):
+        return False
+    directory = _keel_hooks_dir(cwd)
+    if directory is None:
+        return False
+    try:
+        top = Path(_git_toplevel(cwd)).resolve()
+    except (OSError, ValueError):
+        top = cwd.resolve()
+    protected = [directory, *(d for d in directory.parents if d != top and top in d.parents)]
+    protected += [directory / name for name in ("pre-commit", "reference-transaction") if _is_keel_hook(directory / name)]
+    for word in text.split():
+        if word.startswith("-") or word in {";", "&", "|", '""'}:
+            continue
+        target = cwd.resolve() / Path(word).expanduser()  # resolve: на Windows темп-тека має коротке ім'я 8.3
+        if re.search(r"[*?\[]", word):
+            fold = str.casefold if os.name == "nt" else str
+            if any(fnmatch.fnmatchcase(fold(p.as_posix()), fold(target.as_posix())) for p in protected):
+                return True
+        elif target.resolve() in protected:
+            return True
+    return False
+
+
+def _git_toplevel(cwd: Path) -> str:
+    import subprocess  # noqa: PLC0415
+    done = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd, capture_output=True, text=True, timeout=10)
+    if done.returncode != 0:
+        raise ValueError("не git")
+    return done.stdout.strip()
+
+
 def _is_agent_config(path: Path) -> bool:
     parts = [p.casefold() for p in path.parts]
     return parts[-1:] == [".mcp.json"] or (len(parts) >= 2 and parts[-2] == ".claude" and re.fullmatch(r"settings[\w.]*\.json", parts[-1]) is not None)
@@ -417,7 +463,8 @@ def check_shell(raw_command: str, cwd: Path, powershell: bool = False, indirect:
     if AGENT_CONFIG.search(text):
         raise AskHuman("Нова поверхня інструментів чи зміна конфігу агента: вирішує людина.")
     tampering = [m for m in _CONFIG_TAMPER.finditer(text) if not _CONFIG_READ.search(m.group(0))]
-    if tampering or HOOK_FILES.search(text) or ENV_TAMPER.search(text) or _touches_keel_hook(text, cwd):
+    if (tampering or HOOK_FILES.search(text) or ENV_TAMPER.search(text) or _touches_keel_hook(text, cwd)
+            or _destroys_hooks_dir(text, cwd)):
         raise Blocked("Keel заблокував зміну git-хуків чи конфігурації, якою їх можна обійти. Це робить людина.")
     if HISTORY_PLUMBING.search(text) or _gh_api_writes(text, raw_command) or _gh_api_writes(re.sub(r"[\"']", "", raw_command), raw_command):
         raise Blocked("Keel заблокував запис історії повз `git commit`: перевірити вміст неможливо. Це робить людина.")
@@ -480,7 +527,13 @@ def _patch_findings(text: str, cwd: Path) -> list[secretscan.Finding]:
             path = cwd / Path(name).expanduser()
             if not path.is_file():
                 raise Blocked(f"Keel не знайшов патч {name} перед комітом: застосуй його окремою командою.")
-            findings += secretscan.scan_diff(path.read_text(encoding="utf-8", errors="ignore"))
+            patch = path.read_text(encoding="utf-8", errors="ignore")
+            if re.search(r"(?:^|\s)(?:-R|--reverse|-\w*R\w*)(?:\s|$)", args):
+                # З -R додаються рядки з мінусом: міняємо сторони, щоб сканер бачив те, що стане вмістом.
+                patch = "\n".join("+" + line[1:] if line.startswith("-") and not line.startswith("---") else
+                                   "-" + line[1:] if line.startswith("+") and not line.startswith("+++") else line
+                                   for line in patch.splitlines())
+            findings += secretscan.scan_diff(patch)
     return findings
 
 
@@ -506,6 +559,9 @@ def _shell_request(name: str, tool_input: dict, cwd: str) -> ShellRequest | None
 
 
 def _check_move(tool_input: dict, vault: Vault) -> None:
+    source = Path(str(tool_input.get("source") or ""))
+    if source.is_dir() and any(_is_keel_hook(hook) for name in _KEEL_HOOK_NAMES for hook in source.glob(f"**/{name}")):
+        raise Blocked("Keel заблокував переміщення теки з git-хуками Keel. Це робить людина.")
     for key in ("source", "destination"):
         target = Path(str(tool_input.get(key) or ""))
         if _is_git_control_file(target) or _is_keel_hook(target) or _protected(target, vault):
@@ -558,12 +614,41 @@ def must_fail_closed(payload: dict) -> bool:
             or bool(GIT_OUTBOUND.search(view.text)) or bool(GH_API.search(view.text)) or bool(GH_PUBLISH.search(view.text)))
 
 
-def main(stdin=None, vault: Vault | None = None) -> int:
+DEADLINE_SECONDS = 40.0  # нижче за timeout хука (60 с у hooks.json): таймаут Claude Code вважає дозволом
+
+
+def _arm_deadline(payload: dict):
+    """Перевірка, що не встигла, для запису чи коміту стає блоком (код 2), а не тихим пропуском."""
+    import threading  # noqa: PLC0415
+
+    def expire() -> None:
+        closed = must_fail_closed(payload)
+        print("Keel: перевірка не встигла за %.0f с, дію %s." % (DEADLINE_SECONDS, "зупинено" if closed else "пропущено"),
+              file=sys.stderr)
+        sys.stderr.flush()
+        os._exit(2 if closed else 0)
+
+    timer = threading.Timer(DEADLINE_SECONDS, expire)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+def main(stdin=None, vault: Vault | None = None, deadline: bool = False) -> int:
     try:
         payload = json.load(stdin or sys.stdin)
     except Exception as exc:  # noqa: BLE001
         print(f"Keel: не вдалося прочитати запит хука: {exc}", file=sys.stderr)
         return 2
+    timer = _arm_deadline(payload) if deadline else None
+    try:
+        return _decide_and_report(payload, vault)
+    finally:
+        if timer:
+            timer.cancel()
+
+
+def _decide_and_report(payload: dict, vault: Vault | None) -> int:
     try:
         decide(payload, vault or Vault.default())
         return 0
@@ -585,4 +670,4 @@ def main(stdin=None, vault: Vault | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(deadline=True))

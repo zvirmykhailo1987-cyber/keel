@@ -143,25 +143,31 @@ def _is_binary(text: str) -> bool:
     return bool(sample) and controls * 20 > len(sample)  # \u043f\u043e\u043d\u0430\u0434 5% \u043a\u0435\u0440\u0456\u0432\u043d\u0438\u0445 \u0441\u0438\u043c\u0432\u043e\u043b\u0456\u0432: \u043d\u0435 \u0442\u0435\u043a\u0441\u0442
 
 
+MAX_JOINS = 50_000  # стеля роботи: вхід, зібраний заради таймауту хука, не має виграти час (рецензія 18.11)
+
+
 def _split_findings(text: str) -> list[tuple[int, str, str]]:
-    """Склеює суміжні літерали в усьому тексті й повертає (рядок початку значення, форма, значення)."""
-    pieces, marks, last, removed = [], [], 0, 0
-    for match in _JOIN.finditer(text):
-        pieces.append(text[last:match.start()])
+    """Склеює суміжні літерали в усьому тексті й повертає (рядок значення, форма, значення). Лінійно."""
+    import bisect
+    pieces, offsets, removed_totals, last, length, removed = [], [], [], 0, 0, 0
+    for count, match in enumerate(_JOIN.finditer(text)):
+        if count >= MAX_JOINS:
+            print(f"Keel: понад {MAX_JOINS} склейок літералів, решту тексту на розбиті ключі НЕ перевірено.", file=sys.stderr)
+            break
+        piece = text[last:match.start()]
+        pieces.append(piece)
+        length += len(piece)
         removed += match.group(0).count("\n")
-        marks.append((sum(len(x) for x in pieces), removed))
+        offsets.append(length)
+        removed_totals.append(removed)
         last = match.end()
     pieces.append(text[last:])
     joined = "".join(pieces)
     found: list[tuple[int, str, str]] = []
     for name, value in _shapes(joined):
         position = joined.find(value)
-        newlines_removed = 0
-        for offset, total in marks:
-            if offset <= position:
-                newlines_removed = total
-            else:
-                break
+        index = bisect.bisect_right(offsets, position) - 1
+        newlines_removed = removed_totals[index] if index >= 0 else 0
         found.append((joined.count("\n", 0, position) + newlines_removed + 1, name, value))
     return found
 
