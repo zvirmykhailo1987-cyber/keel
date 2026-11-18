@@ -33,7 +33,7 @@ Layers: **L1** `PreToolUse` hook (`guard.py`) · **L2** git `pre-commit` · **L3
 | 16 | `git` spelled through globs, substitution, escapes (`g?t`, `$'\x67it'`, `$(…)`, `g^it`) | Closed | L1 unglobs and expands; L2–L3 do not depend on spelling at all | `test_shell_expansion_of_git_name`, `test_indirect_commit_scans_worktree` |
 | 17 | `core.hooksPath` that switches off L2–L3 | Closed for the agent | L1 blocks it in repo, worktree, global and XDG config, `-c`, `--config-env` and env vars; when a hook manager already set it inside the repository, `reference-transaction` is installed into that directory, excluded locally from git and protected from the agent by its marker; a hooks directory outside the repository is shared and left alone; `/keel:doctor` flags a repository whose hooks git will no longer run | `test_hook_tampering_blocked`, `TestBypassResearch.test_git_config_outside_repo_protected`, `test_growth.TestProject.test_husky_path_respected`, `test_doctor_sees_hooks_disabled_by_hooks_path`, `test_shared_hooks_path_outside_repo_is_left_alone`, `TestHooksPathReal`, `TestBypassResearch.test_keel_hook_in_hooks_path_is_protected`, `test_hooks_dir_cannot_be_removed_by_other_spellings` |
 | 17b | Push to an arbitrary remote | Partly closed | Every push is scanned for secrets in unpushed commits; credentials in URLs are caught; pushing to a foreign remote as such is not blocked | `test_push_scans_unpushed_commits`, `test_push_scans_other_branches` |
-| 18a | Input crafted to make the hook time out (Claude Code treats a hook timeout as *allow*) | Closed | Scanner passes are linear and capped; the guard has its own 40 s deadline (hook timeout is 60 s): a check that does not finish **blocks** a write or commit and lets a read through | `TestBypassResearch.test_padding_cannot_buy_a_timeout`, `test_slow_check_becomes_a_block` |
+| 18a | Input crafted to make the hook time out (Claude Code treats a hook timeout as *allow*) | Closed | Scanner passes are linear with no work cap (a cap was itself a bypass); risky requests (writes, anything mentioning git/gh or able to hide them) are checked in a child process with a 40 s deadline (the hook timeout is 60 s), because a regex holds the GIL and an in-process timer cannot interrupt it. A check that does not finish, or a crashed checker, **blocks** the write or commit | `TestBypassResearch.test_padding_cannot_buy_a_timeout`, `test_slow_check_becomes_a_block`, `test_hook_runs_through_watchdog`, `test_pathological_regex_input_stays_fast`, `test_split_secret_after_many_joins` |
 | 18 | Claude Code deny-rule degradation after 50+ subcommands | Not applicable to L1 | The hook sees the whole command before execution | `TestBypassResearch.test_padding_does_not_hide_commit` |
 | 19 | Claude Code command-parsing CVEs (`$IFS`, `find`, `sed`+`echo`, `cd`) | Out of scope | They bypass Claude Code's permission prompts, not Keel's hook; keep Claude Code updated | — |
 
@@ -48,6 +48,10 @@ Layers: **L1** `PreToolUse` hook (`guard.py`) · **L2** git `pre-commit` · **L3
   machine: 1.9 MB of random binary 0.4 s, 1.5 MB of JSON 1.0 s, 40 000 base64 lines 1.6 s.
 - **Unconventionally named MCP tools** and agents outside this Claude Code session are invisible to L1;
   only L2–L4 apply.
+- **Destructive code instead of commands.** `python -c "shutil.rmtree('.husky')"` removes the hooks directory
+  without a recognisable command; `/keel:doctor` then reports the repository as unprotected.
+- **Latency.** Risky requests pay one extra Python start for the watchdog (about 0.7 s measured on the
+  author's Windows laptop); ordinary reads and commands do not.
 - **A human can override** L2–L3 in their own terminal (`KEEL_ALLOW_SECRET=1 git commit --no-verify`);
   the override is loud. The agent cannot set the variable or the flag.
 - **A pre-existing foreign hook** of the same name is never overwritten; `init-project` reports it and

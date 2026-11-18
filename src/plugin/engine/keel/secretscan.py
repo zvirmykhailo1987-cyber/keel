@@ -143,17 +143,11 @@ def _is_binary(text: str) -> bool:
     return bool(sample) and controls * 20 > len(sample)  # \u043f\u043e\u043d\u0430\u0434 5% \u043a\u0435\u0440\u0456\u0432\u043d\u0438\u0445 \u0441\u0438\u043c\u0432\u043e\u043b\u0456\u0432: \u043d\u0435 \u0442\u0435\u043a\u0441\u0442
 
 
-MAX_JOINS = 50_000  # стеля роботи: вхід, зібраний заради таймауту хука, не має виграти час (рецензія 18.11)
-
-
 def _split_findings(text: str) -> list[tuple[int, str, str]]:
     """Склеює суміжні літерали в усьому тексті й повертає (рядок значення, форма, значення). Лінійно."""
     import bisect
     pieces, offsets, removed_totals, last, length, removed = [], [], [], 0, 0, 0
-    for count, match in enumerate(_JOIN.finditer(text)):
-        if count >= MAX_JOINS:
-            print(f"Keel: понад {MAX_JOINS} склейок літералів, решту тексту на розбиті ключі НЕ перевірено.", file=sys.stderr)
-            break
+    for match in _JOIN.finditer(text):  # лінійно й без стелі: стеля сама ставала обходом (рецензія 18.11)
         piece = text[last:match.start()]
         pieces.append(piece)
         length += len(piece)

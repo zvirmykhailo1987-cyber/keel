@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import fnmatch
+import io
 import json
 import os
 import re
@@ -56,7 +57,7 @@ _CONFIG_TAMPER = re.compile(rf"\bgit\b{_SEGMENT}(?:\bconfig\b|\s-c\s|\s--config-
                             r"core\.fsmonitor|core\.attributesfile|core\.sshcommand|filter\.[\w-]+\.(?:clean|smudge|process|required))")
 _CONFIG_READ = re.compile(r"\bconfig\s+(?:--get\S*|--list|-l|get|list)(?:\s|$)")
 # Windows знімає крапку в кінці сегмента, не зважає на регістр і знає імена 8.3: `.git.`, `.GIT`, `GIT~1`.
-_GIT_META = (r"(?:\S*[/\\])?(?:(?:\.git[. ]*|git~\d)[/\\]+(?:[^\s/\\]+[/\\]+)*(?:hooks|config)\b|"
+_GIT_META = (r"(?:(?:\.git[. ]*|git~\d)[/\\]+(?:[^\s/\\]+[/\\]+)*(?:hooks|config)\b|"
              r"\.gitconfig(?![\w.])|(?:\.config|xdg[\w-]*)[/\\]+git[/\\]+(?:config|attributes)(?![\w.]))")
 _WRITERS = (r"(?:\b(?:rm|mv|cp|chmod|chown|tee|truncate|ln|dd|install|del|erase|ren|rename|rd|rmdir|move|copy|attrib|icacls|ri|"
             r"Remove-Item|Set-Content|Add-Content|Clear-Content|Out-File|Move-Item|Copy-Item|New-Item|Rename-Item)\b|"
@@ -196,7 +197,8 @@ def _keel_hooks_dir(cwd: Path) -> Path | None:
 
 def _destroys_hooks_dir(text: str, cwd: Path) -> bool:
     """`rm -rf .husky`, `mv .husky old`, `rm .husky/reference-transacti?n`: прибрати рубіж L3 можна й без його імені."""
-    if not _DESTROYERS.search(text):
+    destroys, writes = bool(_DESTROYERS.search(text)), bool(re.search(_WRITERS, text, re.I))
+    if not (destroys or writes):
         return False
     directory = _keel_hooks_dir(cwd)
     if directory is None:
@@ -205,11 +207,15 @@ def _destroys_hooks_dir(text: str, cwd: Path) -> bool:
         top = Path(_git_toplevel(cwd)).resolve()
     except (OSError, ValueError):
         top = cwd.resolve()
-    protected = [directory, *(d for d in directory.parents if d != top and top in d.parents)]
-    protected += [directory / name for name in ("pre-commit", "reference-transaction") if _is_keel_hook(directory / name)]
+    hooks = [directory / name for name in _KEEL_HOOK_NAMES if _is_keel_hook(directory / name)]
+    # Запис (truncate, cp, tee, >) шкодить лише самому файлу хука; видалення чи переміщення й теці з батьками.
+    protected = hooks + ([directory, *(d for d in directory.parents if d != top and top in d.parents)] if destroys else [])
     for word in text.split():
-        if word.startswith("-") or word in {";", "&", "|", '""'}:
+        word = word.lstrip(">")
+        if not word or word.startswith("-") or word in {";", "&", "|", '""'}:
             continue
+        if destroys and re.search(r"[$%`]", word):
+            return True  # `rm -rf "$PWD/.husky"`: шлях невідомий до запуску, а тека хуків тут є
         target = cwd.resolve() / Path(word).expanduser()  # resolve: на Windows темп-тека має коротке ім'я 8.3
         if re.search(r"[*?\[]", word):
             fold = str.casefold if os.name == "nt" else str
@@ -558,12 +564,12 @@ def _shell_request(name: str, tool_input: dict, cwd: str) -> ShellRequest | None
     return None
 
 
-def _check_move(tool_input: dict, vault: Vault) -> None:
-    source = Path(str(tool_input.get("source") or ""))
+def _check_move(tool_input: dict, vault: Vault, cwd: Path = Path(".")) -> None:
+    source = cwd / Path(str(tool_input.get("source") or ""))  # відносний шлях MCP рахується від cwd запиту
     if source.is_dir() and any(_is_keel_hook(hook) for name in _KEEL_HOOK_NAMES for hook in source.glob(f"**/{name}")):
         raise Blocked("Keel заблокував переміщення теки з git-хуками Keel. Це робить людина.")
     for key in ("source", "destination"):
-        target = Path(str(tool_input.get(key) or ""))
+        target = cwd / Path(str(tool_input.get(key) or ""))
         if _is_git_control_file(target) or _is_keel_hook(target) or _protected(target, vault):
             raise Blocked("Keel заблокував переміщення git-хуків, конфігу або стану Keel. Це робить людина.")
 
@@ -576,6 +582,8 @@ def decide(payload: dict, vault: Vault) -> None:
     elif MCP_WRITE.fullmatch(name):
         # Назви полів у MCP різні, тому сканується кожне текстове поле, а не лише `content`.
         target = next((str(tool_input[k]) for k in _PATH_KEYS if tool_input.get(k)), "")
+        if target and not Path(target).is_absolute():
+            target = str(Path(payload.get("cwd") or ".") / target)
         content = "\n".join(_strings({k: v for k, v in tool_input.items() if k not in _PATH_KEYS and k != "old_string"}))
         if "old_string" in tool_input:
             check_write("Edit", {"file_path": target, "new_string": content,
@@ -583,7 +591,7 @@ def decide(payload: dict, vault: Vault) -> None:
         else:
             check_write("Write", {"file_path": target, "content": content}, vault)
     elif MCP_MOVE.fullmatch(name):
-        _check_move(tool_input, vault)
+        _check_move(tool_input, vault, Path(payload.get("cwd") or "."))
     else:
         request = _shell_request(name, tool_input, payload.get("cwd") or ".")
         if request:
@@ -617,35 +625,51 @@ def must_fail_closed(payload: dict) -> bool:
 DEADLINE_SECONDS = 40.0  # нижче за timeout хука (60 с у hooks.json): таймаут Claude Code вважає дозволом
 
 
-def _arm_deadline(payload: dict):
-    """Перевірка, що не встигла, для запису чи коміту стає блоком (код 2), а не тихим пропуском."""
-    import threading  # noqa: PLC0415
+def _cheap_fail_closed(raw: bytes) -> bool:
+    """Рішення без розбору, коли перевірка не встигла чи впала: розбір якраз і міг бути повільним."""
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return True
+    name = str(payload.get("tool_name", ""))
+    if name in WRITE_TOOLS or MCP_WRITE.fullmatch(name) or MCP_MOVE.fullmatch(name):
+        return True
+    if not _shell_request(name, payload.get("tool_input") or {}, "."):
+        return False
+    # Надмножина must_fail_closed: git і gh, а також усе, чим ім'я git можна сховати (глоб, підстановка, екранування).
+    text = "\n".join(_strings(payload.get("tool_input") or {})).lower()
+    return len(text) > 4000 or bool(re.search(r"git|\bgh\b|gh\.exe|commit|push|[?*\[\]{}$`\\^%]|eval|iex|invoke", text))
 
-    def expire() -> None:
-        closed = must_fail_closed(payload)
-        print("Keel: перевірка не встигла за %.0f с, дію %s." % (DEADLINE_SECONDS, "зупинено" if closed else "пропущено"),
+
+def watchdog(raw: bytes, deadline: float = DEADLINE_SECONDS, child: list[str] | None = None) -> int:
+    """Перевірку робить дочірній процес, а цей лише чекає. Регекс тримає GIL, тож таймер у тому самому
+    процесі не перерве повільний виклик (рецензія 18.11: 108 с при дедлайні 40 с). Процес можна вбити."""
+    import subprocess  # noqa: PLC0415
+    if child is None and not _cheap_fail_closed(raw):
+        # Таймаут тут однаково означав би пропуск, тож окремий процес нічого не додає, а коштує старту Python.
+        return main(io.StringIO(raw.decode("utf-8", errors="replace")))
+    command = child or [sys.executable, "-m", "keel.guard", "--child"]
+    try:
+        done = subprocess.run(command, input=raw, capture_output=True, timeout=deadline)
+    except subprocess.TimeoutExpired:
+        closed = _cheap_fail_closed(raw)
+        print("Keel: перевірка не встигла за %.0f с, дію %s." % (deadline, "зупинено" if closed else "пропущено"),
               file=sys.stderr)
-        sys.stderr.flush()
-        os._exit(2 if closed else 0)
+        return 2 if closed else 0
+    sys.stdout.write(done.stdout.decode("utf-8", errors="replace"))
+    sys.stderr.write(done.stderr.decode("utf-8", errors="replace"))
+    if done.returncode in (0, 2):
+        return done.returncode
+    return 2 if _cheap_fail_closed(raw) else 0  # падіння інтерпретатора не має ставати дозволом
 
-    timer = threading.Timer(DEADLINE_SECONDS, expire)
-    timer.daemon = True
-    timer.start()
-    return timer
 
-
-def main(stdin=None, vault: Vault | None = None, deadline: bool = False) -> int:
+def main(stdin=None, vault: Vault | None = None) -> int:
     try:
         payload = json.load(stdin or sys.stdin)
     except Exception as exc:  # noqa: BLE001
         print(f"Keel: не вдалося прочитати запит хука: {exc}", file=sys.stderr)
         return 2
-    timer = _arm_deadline(payload) if deadline else None
-    try:
-        return _decide_and_report(payload, vault)
-    finally:
-        if timer:
-            timer.cancel()
+    return _decide_and_report(payload, vault)
 
 
 def _decide_and_report(payload: dict, vault: Vault | None) -> int:
@@ -670,4 +694,6 @@ def _decide_and_report(payload: dict, vault: Vault | None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(deadline=True))
+    if "--child" in sys.argv:
+        raise SystemExit(main())
+    raise SystemExit(watchdog(sys.stdin.buffer.read()))

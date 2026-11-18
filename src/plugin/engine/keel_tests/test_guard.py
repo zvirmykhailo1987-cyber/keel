@@ -650,15 +650,38 @@ class TestBypassResearch(unittest.TestCase):
     def test_slow_check_becomes_a_block(self):
         """Внутрішній дедлайн: якщо перевірка запису не встигла, це блок; якщо читання, пропуск."""
         import sys
-        code = ("import io, json, sys, time; from pathlib import Path; from keel import guard; from keel.paths import Vault;"
-                "guard.DEADLINE_SECONDS = 0.5; guard.decide = lambda p, v: time.sleep(10);"
-                "sys.exit(guard.main(io.StringIO(sys.argv[1]), Vault(Path(sys.argv[2])), deadline=True))")
+        slow = [sys.executable, "-c", "import time; time.sleep(10)"]
+        crash = [sys.executable, "-c", "raise SystemExit(1)"]
+        cases = ((slow, {"tool_name": "Write", "tool_input": {"file_path": "a.py", "content": "x"}}, 2),
+                 (slow, {"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}, 2),
+                 (slow, {"tool_name": "Bash", "tool_input": {"command": "ls"}}, 0),
+                 (crash, {"tool_name": "Bash", "tool_input": {"command": "gh api x"}}, 2),
+                 (crash, {"tool_name": "Read", "tool_input": {"file_path": "a.py"}}, 0))
+        for child, payload, expected in cases:
+            with mock.patch("sys.stderr", io.StringIO()):
+                code = guard.watchdog(json.dumps(payload).encode(), deadline=0.5, child=child)
+            self.assertEqual(code, expected, (child[-1], payload))
+
+    def test_hook_runs_through_watchdog(self):
+        """Справжній запуск, як у hooks.json: `python -m keel.guard` блокує через дочірній процес."""
+        import os
+        import sys
         engine = str(Path(guard.__file__).resolve().parents[1])
-        for payload, expected in (({"tool_name": "Write", "tool_input": {"file_path": "a.py", "content": "x"}}, 2),
-                                  ({"tool_name": "Bash", "tool_input": {"command": "ls"}}, 0)):
-            done = subprocess.run([sys.executable, "-c", code, json.dumps(payload), str(self.vault.root)],
-                                  capture_output=True, timeout=30, env={**__import__("os").environ, "PYTHONPATH": engine})
-            self.assertEqual(done.returncode, expected, done.stderr)
+        payload = json.dumps({"tool_name": "Write", "cwd": str(self.repo),
+                              "tool_input": {"file_path": str(self.repo / "a.py"), "content": GH}})
+        done = subprocess.run([sys.executable, "-m", "keel.guard"], input=payload.encode(), capture_output=True, timeout=60,
+                              env={**os.environ, "PYTHONPATH": engine, "KEEL_HOME": str(self.tmp)})
+        self.assertEqual(done.returncode, 2, done.stderr)
+
+    def test_pathological_regex_input_stays_fast(self):
+        import time
+        start = time.monotonic()
+        self.assertEqual(self.bash("echo > " + ".git/" * 600 + "x; gh api -X PUT repos/o/r/contents/a.txt -f content=x"), 2)
+        self.assertLess(time.monotonic() - start, 10)
+
+    def test_split_secret_after_many_joins(self):
+        content = "x = " + '"" ' * 60000 + f'\nk = "{AWS[:8]}" + "{AWS[8:]}"'
+        self.assertEqual(self.write(content), 2)
 
     def test_hooks_dir_cannot_be_removed_by_other_spellings(self):
         git(self.repo, "config", "core.hooksPath", ".husky")
@@ -666,9 +689,11 @@ class TestBypassResearch(unittest.TestCase):
         hook.parent.mkdir()
         hook.write_text("#!/bin/sh\n# keel-managed: test\n", encoding="utf-8")
         for command in ("rm .husky/reference-transacti?n", "rm -rf .husky", "mv .husky old", "rm -r .hus*",
-                        "Remove-Item -Recurse .husky"):
+                        "Remove-Item -Recurse .husky", 'rm -rf "$PWD/.husky"', "truncate -s0 .husky/reference-transac*",
+                        "cp /dev/null .husky/reference-transaction", ">.husky/reference-transaction"):
             self.assertEqual(self.bash(command), 2, command)
         self.assertEqual(self.mcp("mcp__fs__move_file", source=str(self.repo / ".husky"), destination=str(self.tmp / "o")), 2)
+        self.assertEqual(self.mcp("mcp__fs__move_file", source=".husky", destination="o"), 2, "відносний шлях від cwd запиту")
         for command in ("rm -rf build", "mv a.txt b.txt", "rm .husky/notes.md", "cp a.txt ."):
             self.assertEqual(self.bash(command), 0, command)
 
