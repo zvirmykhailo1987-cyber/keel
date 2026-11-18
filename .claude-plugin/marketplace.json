@@ -1,0 +1,17 @@
+{
+  "name": "keel-marketplace",
+  "owner": {
+    "name": "Mykhailo Zvir"
+  },
+  "metadata": {
+    "description": "Keel: a Claude Code plugin with a layered secret and git-history gate for AI agents."
+  },
+  "plugins": [
+    {
+      "name": "keel",
+      "source": "./src/plugin",
+      "version": "0.1.0",
+      "description": "Second brain for developers in Claude Code: layered secret gate, dependency radar, knowledge vault and a tiered autopilot that never pushes, merges or deploys."
+    }
+  ]
+}
