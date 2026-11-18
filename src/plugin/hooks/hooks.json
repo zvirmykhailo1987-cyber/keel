@@ -14,7 +14,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|mcp__.*__(run_in_terminal|start_process|interact_with_process|execute_command|run_command|write_file|edit_block|edit_file|move_file)",
+        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|mcp__.*__(run_in_terminal|start_process|interact_with_process|execute_command|run_command|write_file|edit_block|edit_file|write_pdf|create_file|update_file|append_file|move_file)",
         "hooks": [
           {
             "type": "command",

@@ -43,7 +43,7 @@ class TestScanner(unittest.TestCase):
             "generic-secret": ASSIGN,
             "github-token": GH,
             "anthropic-key": f"key = {ANTHROPIC}",
-            "aws-access-key": "AKIA" + "ABCDEFGHIJKLMNOP",
+            "aws-access-key": "".join(("AKIA", "ABCDEFGHIJKLMNOP")),
             "bat-secret": 'set "SERVICE_TOKEN=' + "Kx9mQ2pL7vR4tB8nZ3wF6sH1jD5gY0aC" + '"',
             "dsn-password": "postgres://admin:" + "Qw3rTy9Uiop2" + "@db.example.com/prod",
         }
@@ -472,6 +472,116 @@ class GuardCase(unittest.TestCase):
             "git config --get diff.external", "echo $'a\\tb'", "mkdir -p src/{a,b}",
         ):
             self.assertEqual(self.bash(command), 0, command)
+
+
+AWS = "".join(("AKIA", "ABCDEFGHIJKLMNOP"))
+
+
+class TestBypassResearch(unittest.TestCase):
+    """docs/BYPASS-RESEARCH.md: на кожну техніку пара «обхід блокується / звичайна робота проходить»."""
+    setUp, run_hook, write, bash = GuardCase.setUp, GuardCase.run_hook, GuardCase.write, GuardCase.bash
+    dirty_worktree, mcp, asked = GuardCase.dirty_worktree, GuardCase.mcp, GuardCase.asked
+
+    def test_split_secret_in_write(self):  # №11
+        for content in (f'K = "{AWS[:4]}" + "{AWS[4:]}"', f'K = ("{AWS[:8]}"\n     "{AWS[8:]}")',
+                        f"K = '{AWS[:4]}' .. '{AWS[4:]}'", f'K = "{AWS[:4]}" +\n  "{AWS[4:]}"'):
+            self.assertEqual(self.write(content), 2, content)
+        self.assertEqual(self.write('greeting = "hello, " + "world"\nurl = ("https://example.test/"\n  "path")'), 0)
+
+    def test_split_secret_in_commit(self):  # №11, той самий рубіж у diff
+        (self.repo / "s.py").write_text(f'K = ("{AWS[:6]}"\n     "{AWS[6:]}")\n', encoding="utf-8")
+        git(self.repo, "add", "s.py")
+        self.assertEqual(self.bash("git commit -m x"), 2)
+        self.assertIn("aws-access-key (split)", {f.type for f in secretscan.scan_staged(self.repo)})
+        (self.repo / "s.py").write_text('MSG = ("first part "\n       "second part")\n', encoding="utf-8")
+        git(self.repo, "add", "s.py")
+        self.assertEqual(self.bash("git commit -m x"), 0)
+
+    def test_encoded_secret(self):  # №12
+        import base64
+        payload = ("key=" + AWS).encode()
+        for content in (f'blob = "{base64.b64encode(payload).decode()}"', f'blob = "{base64.urlsafe_b64encode(payload).decode()}"',
+                        f'blob = "{payload.hex()}"', 'blob = "' + "".join(f"\\x{b:02x}" for b in payload) + '"'):
+            self.assertEqual(self.write(content), 2, content)
+        integrity = base64.b64encode(bytes(range(64))).decode()
+        self.assertEqual(self.write(f'integrity = "sha512-{integrity}"\nsha = "{"0123456789abcdef" * 2}"\n'
+                                    f'png = "{base64.b64encode(b"plain readable text, no key").decode()}"'), 0)
+
+    def test_binary_and_unlisted_files(self):  # №13
+        self.dirty_worktree()
+        (self.repo / "s.py").unlink()
+        (self.repo / "payload.weird").write_bytes(b"\x00\xff\x10" + GH.encode() + b"\x00")
+        self.assertEqual(self.bash("git add . && git commit -m x"), 2)
+        (self.repo / "payload.weird").write_bytes(b"\x00\xff\x10" + b"no secret here" + b"\x00")
+        self.assertEqual(self.bash("git add . && git commit -m x"), 0)
+        self.assertTrue(secretscan.scan_text("a" * 50_000 + " " + GH), "ключ після 4000 символів рядка")
+
+    def test_git_apply_then_commit_reads_the_patch(self):  # №3
+        patch = self.tmp / "p.patch"
+        patch.write_text(f"--- /dev/null\n+++ b/s.py\n@@ -0,0 +1 @@\n+T = '{GH}'\n", encoding="utf-8")
+        self.assertEqual(self.bash(f"git apply --index {patch.as_posix()} && git commit -m x"), 2)
+        self.assertEqual(self.bash(f"git apply --index < {patch.as_posix()} && git commit -m x"), 2)
+        self.assertEqual(self.bash("git apply --index missing.patch && git commit -m x"), 2)
+        patch.write_text("--- /dev/null\n+++ b/s.py\n@@ -0,0 +1 @@\n+x = 1\n", encoding="utf-8")
+        self.assertEqual(self.bash(f"git apply --index {patch.as_posix()} && git commit -m x"), 0)
+        self.assertEqual(self.bash("git stash apply && git commit -m x"), 0)
+        self.assertEqual(self.bash("git apply --check p.patch"), 0)
+
+    def test_gh_api_writes_without_explicit_method(self):  # №4
+        for command in ("gh api repos/o/r/contents/f.txt -f message=x -f content=Zm9v",
+                        "gh api repos/o/r/git/refs -F ref=refs/heads/x -F sha=abc",
+                        "gh api /repos/o/r/git/blobs --input body.json",
+                        "gh api gists -f 'files[a.txt][content]=x'",
+                        "gh api repos/o/r/releases -f tag_name=v1",
+                        "gh api graphql -f query='mutation { createCommitOnBranch(input: {}) { commit { oid } } }'"):
+            self.assertEqual(self.bash(command), 2, command)
+        for command in ("gh api repos/o/r/contents/f.txt", "gh api -X GET repos/o/r/git/refs -f per_page=1",
+                        "gh api repos/o/r/issues -f title=bug", "gh api graphql -f query='{ viewer { login } }'",
+                        "gh api repos/o/r/releases/latest"):
+            self.assertEqual(self.bash(command), 0, command)
+
+    def test_gh_publish_goes_to_human(self):  # №4: gist і release публікують файли повз push
+        for command in ("gh gist create s.py", "gh release create v1 dist.zip", "gh release upload v1 a.zip"):
+            self.assertTrue(self.asked("Bash", command=command), command)
+        for command in ("gh gist list", "gh release view v1", "gh release list"):
+            self.assertFalse(self.asked("Bash", command=command), command)
+            self.assertEqual(self.bash(command), 0, command)
+
+    def test_mcp_write_scans_every_field(self):  # №9
+        cases = (("mcp__dc__write_pdf", {"outputPath": "r.pdf", "content": GH}),
+                 ("mcp__drive__create_file", {"title": "notes", "text": GH}),
+                 ("mcp__drive__update_file", {"fileId": "1", "body": f"x\n{GH}"}),
+                 ("mcp__fs__append_file", {"path": str(self.repo / "a.py"), "data": GH}))
+        for tool, tool_input in cases:
+            self.assertEqual(self.mcp(tool, **tool_input), 2, tool)
+            clean = {k: ("ok" if v.endswith(GH) else v) for k, v in tool_input.items()}
+            self.assertEqual(self.mcp(tool, **clean), 0, tool)
+        self.assertEqual(self.mcp("mcp__fs__write_file", path=str(self.tmp / "home" / ".gitconfig"), content="[core]"), 2)
+
+    def test_git_config_outside_repo_protected(self):  # №17 core.hooksPath через глобальний конфіг
+        home = self.tmp / "home"
+        for target in (home / ".gitconfig", home / ".config" / "git" / "config", self.repo / ".git" / "config.worktree",
+                       self.repo / ".git" / "worktrees" / "a" / "config.worktree"):
+            self.assertEqual(self.run_hook({"tool_name": "Write", "tool_input": {"file_path": str(target), "content": "[core]"}}),
+                             2, target)
+        for command in ("echo '[core]' >> ~/.gitconfig", "cp evil ~/.config/git/config", "tee .git/worktrees/a/config.worktree < x"):
+            self.assertEqual(self.bash(command), 2, command)
+        for command in ("cat ~/.gitconfig", "git config --global --get user.name", "ls ~/.config/git"):
+            self.assertEqual(self.bash(command), 0, command)
+        self.assertEqual(self.write("# notes", "docs/gitconfig.md"), 0)
+
+    def test_padding_does_not_hide_commit(self):  # №18: deny-правила CC деградують після 50 підкоманд, хук ні
+        self.dirty_worktree()
+        self.assertEqual(self.bash("true && " * 60 + "git add . && git commit -m x"), 2)
+        self.assertEqual(self.bash("true && " * 60 + "git status"), 0)
+
+    def test_new_pragma_goes_to_human(self):  # №14
+        self.assertTrue(self.asked("Write", file_path=str(self.repo / "f.py"), content="# secret-scan: ignore\nx = 1"))
+        (self.repo / "fixture.py").write_text("# secret-scan: ignore\nx = 1\n", encoding="utf-8")
+        self.assertFalse(self.asked("Write", file_path=str(self.repo / "fixture.py"), content="# secret-scan: ignore\nx = 2"))
+        self.assertFalse(self.asked("Edit", file_path=str(self.repo / "fixture.py"),
+                                    old_string="# secret-scan: ignore\nx = 1", new_string="# secret-scan: ignore\nx = 3"))
+        self.assertFalse(self.asked("Write", file_path=str(self.repo / "f.py"), content="x = 1"))
 
 
 if __name__ == "__main__":
