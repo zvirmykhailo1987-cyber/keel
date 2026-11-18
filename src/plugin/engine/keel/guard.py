@@ -219,7 +219,12 @@ def _destroys_hooks_dir(text: str, cwd: Path) -> bool:
         target = cwd.resolve() / Path(word).expanduser()  # resolve: на Windows темп-тека має коротке ім'я 8.3
         if re.search(r"[*?\[]", word):
             fold = str.casefold if os.name == "nt" else str
-            if any(fnmatch.fnmatchcase(fold(p.as_posix()), fold(target.as_posix())) for p in protected):
+            # Як і оболонка, глоб без крапки на початку не бере прихованих імен: `rm -rf *` не чіпає `.husky`.
+            hidden_ok = Path(word).name.startswith(".")
+            # fnmatch пускає `*` через `/`, оболонка ні: порівнюємо по компонентах шляху.
+            if any(len(p.parts) == len(target.parts)
+                   and all(fnmatch.fnmatchcase(fold(a), fold(b)) for a, b in zip(p.parts, target.parts))
+                   and (hidden_ok or not p.name.startswith(".")) for p in protected):
                 return True
         elif target.resolve() in protected:
             return True
@@ -651,6 +656,9 @@ def watchdog(raw: bytes, deadline: float = DEADLINE_SECONDS, child: list[str] | 
     command = child or [sys.executable, "-m", "keel.guard", "--child"]
     try:
         done = subprocess.run(command, input=raw, capture_output=True, timeout=deadline)
+    except OSError as exc:  # не вдалося навіть запустити перевірку: код 1 Claude Code вважав би дозволом
+        print(f"Keel: не вдалося запустити перевірку: {exc}", file=sys.stderr)
+        return 2 if _cheap_fail_closed(raw) else 0
     except subprocess.TimeoutExpired:
         closed = _cheap_fail_closed(raw)
         print("Keel: перевірка не встигла за %.0f с, дію %s." % (deadline, "зупинено" if closed else "пропущено"),

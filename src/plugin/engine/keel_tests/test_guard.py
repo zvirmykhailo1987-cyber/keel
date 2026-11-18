@@ -652,6 +652,9 @@ class TestBypassResearch(unittest.TestCase):
         import sys
         slow = [sys.executable, "-c", "import time; time.sleep(10)"]
         crash = [sys.executable, "-c", "raise SystemExit(1)"]
+        with mock.patch("sys.stderr", io.StringIO()):
+            missing = guard.watchdog(b'{"tool_name": "Write", "tool_input": {}}', deadline=1, child=["keel-no-such-binary"])
+        self.assertEqual(missing, 2, "не запустилась перевірка: блок, а не код 1")
         cases = ((slow, {"tool_name": "Write", "tool_input": {"file_path": "a.py", "content": "x"}}, 2),
                  (slow, {"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}, 2),
                  (slow, {"tool_name": "Bash", "tool_input": {"command": "ls"}}, 0),
@@ -694,7 +697,7 @@ class TestBypassResearch(unittest.TestCase):
             self.assertEqual(self.bash(command), 2, command)
         self.assertEqual(self.mcp("mcp__fs__move_file", source=str(self.repo / ".husky"), destination=str(self.tmp / "o")), 2)
         self.assertEqual(self.mcp("mcp__fs__move_file", source=".husky", destination="o"), 2, "відносний шлях від cwd запиту")
-        for command in ("rm -rf build", "mv a.txt b.txt", "rm .husky/notes.md", "cp a.txt ."):
+        for command in ("rm -rf build", "mv a.txt b.txt", "rm .husky/notes.md", "cp a.txt .", "rm -rf *", "rm *.log"):
             self.assertEqual(self.bash(command), 0, command)
 
     def test_git_apply_reverse_reads_removed_lines(self):
