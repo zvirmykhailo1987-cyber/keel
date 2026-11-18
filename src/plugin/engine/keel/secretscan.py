@@ -81,28 +81,89 @@ def _preview(value: str) -> str:
     return value[:4] + "…" if len(value) > 4 else "…"
 
 
-def scan_text(text: str, path: str = "<text>") -> list[Finding]:
-    findings: list[Finding] = []
-    file_pragma = bool(PRAGMA.search("\n".join(text.splitlines()[:5])))
-    for number, line in enumerate(text.splitlines(), 1):
-        line = line[:MAX_LINE]
+# Склейка рядкових літералів: `"AKIA" + "…"`, `'a' 'b'`, `"a" .. "b"`, і те саме через перенос рядка.
+_JOIN = re.compile(r"""(["'])[ \t]*(?:\+|\.\.|\.|&)?[ \t]*\\?[ \t]*\n?[ \t]*(?:\+|\.\.|\.|&)?[ \t]*(["'])""")
+_B64 = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{24,}={0,2}")
+_HEX = re.compile(r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}){16,}(?![0-9A-Fa-f])")
+_ESCAPED = re.compile(r"(?:\\x[0-9A-Fa-f]{2}){8,}")
+_WINDOW = 4  # скільки сусідніх рядків склеюємо: значення, розбите на більше, гейт не побачить (README)
+MAX_SCAN = 2_000_000
+
+
+def _shapes(text: str) -> list[tuple[str, str]]:
+    """Форми по всій довжині рядка, вікнами з перекриттям: довгий рядок (мініфікований чи бінарний) не ховає ключ."""
+    found: list[tuple[str, str]] = []
+    text = text[:MAX_SCAN]
+    for start in range(0, max(len(text), 1), MAX_LINE):
+        chunk = text[start:start + MAX_LINE + 200]
         for name, rx in _SHAPES:
+            for match in rx.finditer(chunk):
+                found.append((name, match.group(0)))
+    return found
+
+
+def _printable(data: bytes) -> str | None:
+    text = data.decode("latin-1")
+    good = sum(1 for c in text if c.isprintable() or c in "\n\r\t")
+    return text if text and good / len(text) >= 0.9 else None
+
+
+def _decoded(line: str) -> list[tuple[str, str]]:
+    """Ключ у base64, hex чи `\\x..`: шукаємо ті самі форми в розкодованому вмісті."""
+    import base64
+    import binascii
+    found: list[tuple[str, str]] = []
+    candidates: list[bytes] = []
+    for match in _B64.finditer(line):
+        token = match.group(0).rstrip("=").replace("-", "+").replace("_", "/")
+        try:
+            candidates.append(base64.b64decode(token + "=" * (-len(token) % 4), validate=True))
+        except (binascii.Error, ValueError):
+            pass
+    for match in _HEX.finditer(line):
+        candidates.append(bytes.fromhex(match.group(0)))
+    for match in _ESCAPED.finditer(line):
+        candidates.append(bytes.fromhex(match.group(0).replace("\\x", "")))
+    for data in candidates:
+        text = _printable(data)
+        if text:
+            found += [(f"{name} (encoded)", value) for name, value in _shapes(text)]
+    return found
+
+
+def scan_text(text: str, path: str = "<text>", file_pragma_allowed: bool = True) -> list[Finding]:
+    findings: list[Finding] = []
+    lines = text.splitlines()
+    file_pragma = file_pragma_allowed and bool(PRAGMA.search("\n".join(lines[:5])))
+    seen: set[str] = set()
+    for number, line in enumerate(lines, 1):
+        shapes = _shapes(line) or _decoded(line)
+        if shapes:
+            name, value = shapes[0]
+            seen.update(v for _, v in shapes)
+            findings.append(Finding(path, number, name, _preview(value)))
+            continue
+        line = line[:MAX_LINE]
+        if file_pragma or PRAGMA.search(line) or _COMMENT.match(line):
+            continue
+        for name, rx in _ASSIGNS:
             match = rx.search(line)
-            if match:
-                findings.append(Finding(path, number, name, _preview(match.group(0))))
-                break
-        else:
-            if file_pragma or PRAGMA.search(line) or _COMMENT.match(line):
+            if not match:
                 continue
-            for name, rx in _ASSIGNS:
-                match = rx.search(line)
-                if not match:
-                    continue
-                value = match.group("v")
-                if _PLACEHOLDER_VALUE.search(value) or len(value) < 12 or entropy(value) < 3.0:
-                    continue
-                findings.append(Finding(path, number, name, _preview(value)))
-                break
+            value = match.group("v")
+            if _PLACEHOLDER_VALUE.search(value) or len(value) < 12 or entropy(value) < 3.0:
+                continue
+            findings.append(Finding(path, number, name, _preview(value)))
+            break
+    if _JOIN.search(text):
+        for index in range(len(lines)):
+            window = "\n".join(lines[index:index + _WINDOW])
+            if not _JOIN.search(window):
+                continue
+            for name, value in _shapes(_JOIN.sub("", window)):
+                if value not in seen:
+                    seen.add(value)
+                    findings.append(Finding(path, index + 1, f"{name} (split)", _preview(value)))
     return findings
 
 
@@ -136,19 +197,34 @@ def is_git_ignored(path: Path) -> bool:
 
 
 def scan_diff(diff: str) -> list[Finding]:
-    """Лише додані рядки з unified diff (-U0)."""
+    """Лише додані рядки з unified diff (-U0). Суміжні додані рядки скануються блоком, щоб
+    побачити значення, розбите на кілька рядків. Прагма діє лише в межах свого рядка."""
     findings: list[Finding] = []
-    current, line_no = "<diff>", 0
+    current, line_no, block, start = "<diff>", 0, [], 0
+
+    def flush() -> None:
+        nonlocal block
+        if block:
+            for finding in scan_text("\n".join(block), current, file_pragma_allowed=False):
+                findings.append(Finding(current, start + finding.line - 1, finding.type, finding.preview))
+        block = []
+
     for raw in diff.splitlines():
         if raw.startswith("+++ "):
+            flush()
             current = raw[4:].removeprefix("b/")
         elif raw.startswith("@@"):
+            flush()
             match = re.search(r"\+(\d+)", raw)
             line_no = int(match.group(1)) if match else 0
         elif raw.startswith("+"):
-            for finding in scan_text(raw[1:], current):
-                findings.append(Finding(current, line_no, finding.type, finding.preview))
+            if not block:
+                start = line_no
+            block.append(raw[1:])
             line_no += 1
+        else:
+            flush()
+    flush()
     return findings
 
 
@@ -170,10 +246,20 @@ def scan_worktree_changes(repo: Path) -> list[Finding]:
     else:
         findings += scan_staged(repo)
     for name in _git(["ls-files", "-o", "--exclude-standard"], repo).splitlines():
-        path = repo / name
-        if path.suffix.lower() in TEXT_SUFFIXES and path.is_file() and path.stat().st_size < 2_000_000:
-            findings += scan_text(path.read_text(encoding="utf-8", errors="ignore"), name)
+        text = _file_text(repo / name)
+        if text is not None:
+            findings += scan_text(text, name)
     return findings
+
+
+def _file_text(path: Path) -> str | None:
+    """Будь-який файл, і бінарний теж: суфікс не гарантує, що всередині немає ключа."""
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_SCAN:
+            return None
+        return path.read_bytes().decode("utf-8", errors="ignore")
+    except OSError:
+        return None
 
 
 def scan_unpushed(repo: Path, limit: int = 200) -> list[Finding]:
@@ -220,8 +306,9 @@ def scan_paths(paths: list[Path]) -> list[Finding]:
         files = [root] if root.is_file() else [
             p for p in root.rglob("*")
             if p.is_file() and not (set(p.relative_to(root).parts) & SKIP_DIRS)
-            and p.suffix.lower() in TEXT_SUFFIXES
         ]
         for path in files:
-            findings += scan_text(path.read_text(encoding="utf-8", errors="ignore"), str(path))
+            text = _file_text(path)
+            if text is not None:
+                findings += scan_text(text, str(path))
     return findings
