@@ -1,0 +1,9 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    rack (2.0.1)
+      thor (>= 0)
+    nokogiri (1.10.0-x86_64-linux)
+
+PLATFORMS
+  ruby

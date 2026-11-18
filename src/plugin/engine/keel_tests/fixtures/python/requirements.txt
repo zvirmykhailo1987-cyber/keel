@@ -1,0 +1,4 @@
+# коментар
+requests==2.19.0
+flask[async]==2.0.0 ; python_version > '3'
+uvicorn>=0.20

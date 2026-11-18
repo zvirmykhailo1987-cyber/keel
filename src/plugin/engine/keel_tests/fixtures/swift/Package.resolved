@@ -1,0 +1,12 @@
+{
+ "pins": [
+  {
+   "identity": "vapor",
+   "location": "https://github.com/vapor/vapor.git",
+   "state": {
+    "version": "4.0.0"
+   }
+  }
+ ],
+ "version": 2
+}
