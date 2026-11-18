@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeReviewFinding",
+  "description": "Одна знахідка ревʼю. Звіт є масивом таких об'єктів, найсерйозніші зверху. Знахідка без конкретного рядка й сценарію поломки до звіту не потрапляє.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "file",
+    "line",
+    "category",
+    "failure_scenario",
+    "severity",
+    "fix",
+    "needs_confirmation"
+  ],
+  "properties": {
+    "file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Шлях відносно кореня репозиторію."
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Рядок у поточній голові зміни, рахунок від 1."
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "correctness",
+        "security",
+        "data",
+        "compatibility",
+        "performance",
+        "tests",
+        "maintainability"
+      ]
+    },
+    "failure_scenario": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Конкретні вхід і стан, потім неправильний вихід чи збій. Якщо не відтворено, починається зі слів «Не відтворено запуском:»."
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "fix": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Мінімальна правка в стилі сусіднього коду."
+    },
+    "needs_confirmation": {
+      "type": "boolean",
+      "description": "true, якщо виправлення зачіпає незворотне: міграцію робочої бази, деплой, ротацію секрету, видалення даних."
+    }
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ResearchFinding",
+  "description": "Одна знахідка дослідження з відкритих джерел. Необов'язкове виражено через null, що означає «немає даних». Поля йдуть у порядку: твердження, докази, перевірка, висновок, упевненість.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "claim",
+    "kind",
+    "sources",
+    "cross_check",
+    "refutation_attempt",
+    "verify_status",
+    "citation_exists",
+    "citation_supports",
+    "citation_faithful",
+    "reliability",
+    "needs_followup",
+    "confidence",
+    "uncertainty_factors",
+    "escalation",
+    "escalation_reason"
+  ],
+  "properties": {
+    "claim": {
+      "type": "string",
+      "description": "Твердження одним реченням, без прикрас."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["fact", "estimate", "rumor", "forecast"],
+      "description": "Оцінку, чутку чи прогноз не подавати як факт. fact вимагає verify_status = VERIFIED."
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Джерела твердження. Два передруки одного релізу це одне джерело.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "url", "date", "quote", "verify_status"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["primary", "secondary", "aggregator", "official_portal", "peer_reviewed"]
+          },
+          "url": {
+            "type": "string",
+            "description": "URL сторінки, де є цитата."
+          },
+          "date": {
+            "type": ["string", "null"],
+            "description": "Дата публікації чи оновлення, прочитана на самій сторінці. null, якщо її немає."
+          },
+          "quote": {
+            "type": ["string", "null"],
+            "description": "Дослівна цитата від 20 символів, скопійована зі сторінки. null, якщо цитати немає."
+          },
+          "verify_status": {
+            "type": "string",
+            "enum": ["VERIFIED", "UNVERIFIED", "REFUTED", "NOT_RUN"],
+            "description": "Результат verify-fact для цього джерела. NOT_RUN: не запускали."
+          }
+        }
+      }
+    },
+    "cross_check": {
+      "type": ["string", "null"],
+      "description": "Результат зіставлення незалежних джерел. null, якщо не проводилось."
+    },
+    "refutation_attempt": {
+      "type": ["string", "null"],
+      "description": "Де шукали докази проти і що знайшли. null, якщо спроби не було: це знижує надійність."
+    },
+    "verify_status": {
+      "type": "string",
+      "enum": ["VERIFIED", "UNVERIFIED", "REFUTED", "NOT_RUN"],
+      "description": "Загальний статус verify-fact для твердження. Сильне твердження потребує двох незалежних джерел."
+    },
+    "citation_exists": {
+      "type": ["boolean", "null"],
+      "description": "Посилання відкривається. null: не перевірено."
+    },
+    "citation_supports": {
+      "type": ["boolean", "null"],
+      "description": "Цитата дослівно є на сторінці. null: не перевірено."
+    },
+    "citation_faithful": {
+      "type": ["boolean", "null"],
+      "description": "Цитата справді підтверджує твердження, а не лише схожа на нього. Це оцінка, а не перевірка кодом. null: не оцінено."
+    },
+    "reliability": {
+      "type": "string",
+      "enum": ["confirmed", "plausible", "unconfirmed"],
+      "description": "confirmed лише з первинним джерелом і VERIFIED. Лише агрегатор чи без джерела: unconfirmed."
+    },
+    "needs_followup": {
+      "type": "boolean",
+      "description": "Чи потрібне подальше дослідження."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Порядкова шкала: самооцінка моделі завищена, тому не число."
+    },
+    "uncertainty_factors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Що саме знижує впевненість. Порожній масив, якщо нічого."
+    },
+    "escalation": {
+      "type": "string",
+      "enum": ["ok", "needs_review", "refuse"],
+      "description": "ok: можна далі. needs_review: потрібна людина чи уточнення. refuse: поза межами навички."
+    },
+    "escalation_reason": {
+      "type": ["string", "null"],
+      "description": "Причина needs_review чи refuse. null для ok."
+    }
+  }
+}
