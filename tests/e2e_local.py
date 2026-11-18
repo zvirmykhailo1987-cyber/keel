@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Наскрізний прогін на зібраному дистрибутиві. Без LLM, мережа жива (OSV, реєстри).
+Git ізольовано від машини: порожній глобальний і системний конфіг (хуки, alias, gpgsign власника не впливають).
 Запуск: python tests/e2e_local.py [--real-schedule]
 --real-schedule реєструє справжнє завдання Windows/launchd і одразу його знімає."""
 import json
@@ -26,9 +27,13 @@ def main():
         tmp = Path(tmp)
         home, vault = tmp / "home", tmp / "vault"
         home.mkdir()
+        gitconfig = tmp / "gitconfig"
+        gitconfig.write_text("[init]\n\tdefaultBranch = main\n", encoding="utf-8")
         env = {**os.environ, "KEEL_HOME": str(home), "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1",
+               "GIT_CONFIG_GLOBAL": str(gitconfig), "GIT_CONFIG_NOSYSTEM": "1",
                "CLAUDE_PLUGIN_ROOT": str(PLUGIN), "PYTHONPATH": str(PLUGIN / "engine")}
-        env.pop("KEEL_VAULT", None)
+        for name in ("KEEL_VAULT", "KEEL_ALLOW_SECRET", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+            env.pop(name, None)
 
         def keel(*args, stdin=None, cwd=None):
             done = subprocess.run([sys.executable, "-m", "keel", *args], env=env, cwd=cwd or tmp, input=stdin,
