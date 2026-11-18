@@ -83,29 +83,30 @@ def _preview(value: str) -> str:
 
 # Склейка рядкових літералів: `"AKIA" + "…"`, `'a' 'b'`, `"a" .. "b"`, і те саме через перенос рядка.
 _JOIN = re.compile(r"""(["'])[ \t]*(?:\+|\.\.|\.|&)?[ \t]*\\?[ \t]*\n?[ \t]*(?:\+|\.\.|\.|&)?[ \t]*(["'])""")
-_B64 = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{24,}={0,2}")
-_HEX = re.compile(r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}){16,}(?![0-9A-Fa-f])")
+_B64 = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{24,8192}={0,2}")
+_HEX = re.compile(r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}){16,4096}(?![0-9A-Fa-f])")
 _ESCAPED = re.compile(r"(?:\\x[0-9A-Fa-f]{2}){8,}")
-_WINDOW = 4  # скільки сусідніх рядків склеюємо: значення, розбите на більше, гейт не побачить (README)
+# Літерал, без якого форма неможлива: регекс запускаємо, лише якщо він є в тексті. Одна велика
+# альтернатива з усіх форм виявилась у 20 разів повільнішою за окремі регекси (губиться пошук префікса).
+_SHAPE_LITERALS = {"private-key": "-----BEGIN", "aws-access-key": "AKIA", "google-api-key": "AIza", "slack-token": "xox",
+                   "github-token": "_", "github-fine-grained": "github_pat_", "gitlab-token": "glpat-",
+                   "anthropic-key": "sk-ant-", "openai-key": "sk-", "stripe-live-key": "_live_", "npm-token": "npm_",
+                   "pypi-token": "pypi-", "huggingface-token": "hf_", "telegram-bot-token": ":", "sendgrid-key": "SG.",
+                   "twilio-key": "SK", "shopify-token": "shp", "digitalocean-token": "_v1_", "azure-storage-key": "AccountKey="}
+_SHAPE_CHECKS = [(name, rx, _SHAPE_LITERALS[name]) for name, rx in _SHAPES]
+_ASSIGN_WORDS = ("key", "secret", "passw", "token", "://", "eyj")
 MAX_SCAN = 2_000_000
 
 
 def _shapes(text: str) -> list[tuple[str, str]]:
     """Форми по всій довжині рядка, вікнами з перекриттям: довгий рядок (мініфікований чи бінарний) не ховає ключ."""
     found: list[tuple[str, str]] = []
-    text = text[:MAX_SCAN]
     for start in range(0, max(len(text), 1), MAX_LINE):
         chunk = text[start:start + MAX_LINE + 200]
-        for name, rx in _SHAPES:
-            for match in rx.finditer(chunk):
-                found.append((name, match.group(0)))
+        for name, rx, literal in _SHAPE_CHECKS:
+            if literal in chunk:
+                found += [(name, match.group(0)) for match in rx.finditer(chunk)]
     return found
-
-
-def _printable(data: bytes) -> str | None:
-    text = data.decode("latin-1")
-    good = sum(1 for c in text if c.isprintable() or c in "\n\r\t")
-    return text if text and good / len(text) >= 0.9 else None
 
 
 def _decoded(line: str) -> list[tuple[str, str]]:
@@ -125,19 +126,60 @@ def _decoded(line: str) -> list[tuple[str, str]]:
     for match in _ESCAPED.finditer(line):
         candidates.append(bytes.fromhex(match.group(0).replace("\\x", "")))
     for data in candidates:
-        text = _printable(data)
-        if text:
-            found += [(f"{name} (encoded)", value) for name, value in _shapes(text)]
+        found += [(f"{name} (encoded)", value) for name, value in _shapes(data.decode("latin-1"))]
+    return found
+
+
+def _normalize(text: str) -> str:
+    """UTF-16 (типовий вивід `>` у Windows PowerShell 5.1) після декодування як UTF-8 має NUL між літерами."""
+    if text.count("\x00") * 4 > len(text) > 0:
+        return text.replace("\x00", "")
+    return text
+
+
+def _is_binary(text: str) -> bool:
+    sample = text[:65536]
+    controls = sum(1 for c in sample if c < " " and c not in "\t\n\r\f\v") + sample.count("\ufffd")
+    return bool(sample) and controls * 20 > len(sample)  # \u043f\u043e\u043d\u0430\u0434 5% \u043a\u0435\u0440\u0456\u0432\u043d\u0438\u0445 \u0441\u0438\u043c\u0432\u043e\u043b\u0456\u0432: \u043d\u0435 \u0442\u0435\u043a\u0441\u0442
+
+
+def _split_findings(text: str) -> list[tuple[int, str, str]]:
+    """Склеює суміжні літерали в усьому тексті й повертає (рядок початку значення, форма, значення)."""
+    pieces, marks, last, removed = [], [], 0, 0
+    for match in _JOIN.finditer(text):
+        pieces.append(text[last:match.start()])
+        removed += match.group(0).count("\n")
+        marks.append((sum(len(x) for x in pieces), removed))
+        last = match.end()
+    pieces.append(text[last:])
+    joined = "".join(pieces)
+    found: list[tuple[int, str, str]] = []
+    for name, value in _shapes(joined):
+        position = joined.find(value)
+        newlines_removed = 0
+        for offset, total in marks:
+            if offset <= position:
+                newlines_removed = total
+            else:
+                break
+        found.append((joined.count("\n", 0, position) + newlines_removed + 1, name, value))
     return found
 
 
 def scan_text(text: str, path: str = "<text>", file_pragma_allowed: bool = True) -> list[Finding]:
     findings: list[Finding] = []
+    text = _normalize(text)
+    binary = _is_binary(text)
+    if binary:  # у бінарному вмісті шукаємо лише форми, одним проходом: рядки там випадкові
+        unique = {value: name for name, value in _shapes(text)}  # вікна перекриваються: той самий ключ двічі
+        for value, name in unique.items():
+            findings.append(Finding(path, text.count("\n", 0, text.find(value)) + 1, name, _preview(value)))
+        return findings
     lines = text.splitlines()
     file_pragma = file_pragma_allowed and bool(PRAGMA.search("\n".join(lines[:5])))
     seen: set[str] = set()
     for number, line in enumerate(lines, 1):
-        shapes = _shapes(line) or _decoded(line)
+        shapes = _shapes(line) or ([] if binary else _decoded(line))
         if shapes:
             name, value = shapes[0]
             seen.update(v for _, v in shapes)
@@ -145,6 +187,9 @@ def scan_text(text: str, path: str = "<text>", file_pragma_allowed: bool = True)
             continue
         line = line[:MAX_LINE]
         if file_pragma or PRAGMA.search(line) or _COMMENT.match(line):
+            continue
+        lowered = line.lower()
+        if not any(word in lowered for word in _ASSIGN_WORDS):
             continue
         for name, rx in _ASSIGNS:
             match = rx.search(line)
@@ -155,15 +200,11 @@ def scan_text(text: str, path: str = "<text>", file_pragma_allowed: bool = True)
                 continue
             findings.append(Finding(path, number, name, _preview(value)))
             break
-    if _JOIN.search(text):
-        for index in range(len(lines)):
-            window = "\n".join(lines[index:index + _WINDOW])
-            if not _JOIN.search(window):
-                continue
-            for name, value in _shapes(_JOIN.sub("", window)):
-                if value not in seen:
-                    seen.add(value)
-                    findings.append(Finding(path, index + 1, f"{name} (split)", _preview(value)))
+    if not binary and _JOIN.search(text):
+        for number, name, value in _split_findings(text):
+            if value not in seen:
+                seen.add(value)
+                findings.append(Finding(path, number, f"{name} (split)", _preview(value)))
     return findings
 
 
@@ -253,13 +294,21 @@ def scan_worktree_changes(repo: Path) -> list[Finding]:
 
 
 def _file_text(path: Path) -> str | None:
-    """Будь-який файл, і бінарний теж: суфікс не гарантує, що всередині немає ключа."""
+    """Будь-який файл, і бінарний теж: суфікс не гарантує, що всередині немає ключа.
+    Понад MAX_SCAN читаємо початок і кажемо про це вголос (G43), а не мовчки пропускаємо."""
     try:
-        if not path.is_file() or path.stat().st_size > MAX_SCAN:
+        if not path.is_file():
             return None
-        return path.read_bytes().decode("utf-8", errors="ignore")
+        with path.open("rb") as handle:
+            data = handle.read(MAX_SCAN + 1)
     except OSError:
         return None
+    if len(data) > MAX_SCAN:
+        print(f"Keel: {path} більший за {MAX_SCAN // 1_000_000} МБ, перевірено лише початок.", file=sys.stderr)
+        data = data[:MAX_SCAN]
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return data.decode("utf-16", errors="ignore")
+    return data.decode("utf-8", errors="ignore")
 
 
 def scan_unpushed(repo: Path, limit: int = 200) -> list[Finding]:
