@@ -50,8 +50,8 @@ Layers: **L1** `PreToolUse` hook (`guard.py`) · **L2** git `pre-commit` · **L3
   only L2–L4 apply.
 - **Destructive code instead of commands.** `python -c "shutil.rmtree('.husky')"` removes the hooks directory
   without a recognisable command; `/keel:doctor` then reports the repository as unprotected.
-- **Latency.** Risky requests pay one extra Python start for the watchdog (about 0.7 s measured on the
-  author's Windows laptop); ordinary reads and commands do not.
+- **Latency.** Risky requests pay one extra Python start for the watchdog (about 0.7 s measured on a
+  Windows 11 machine); ordinary reads and commands do not.
 - **A human can override** L2–L3 in their own terminal (`KEEL_ALLOW_SECRET=1 git commit --no-verify`);
   the override is loud. The agent cannot set the variable or the flag.
 - **A pre-existing foreign hook** of the same name is never overwritten; `init-project` reports it and
