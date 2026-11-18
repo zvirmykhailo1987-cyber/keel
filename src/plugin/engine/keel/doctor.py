@@ -96,6 +96,14 @@ def check_vault(vault: Vault) -> list[dict]:
     gone = [name for name, path in projects.items() if not Path(path).is_dir()]
     items.append(_item("проєкти", WARN if gone or not projects else OK,
                        f"підключено {len(projects)}" + (f", зникли: {gone}" if gone else ""), "/keel:init-project"))
+    # Хук міряємо там, звідки його запустить git: core.hooksPath, заданий пізніше, тихо вимикає .git/hooks.
+    from .project import hook_status  # noqa: PLC0415 - легкий імпорт лише для лікаря
+    missing = {name: [h for h, ok in hook_status(Path(path)).items() if not ok]
+               for name, path in projects.items() if Path(path).is_dir()}
+    missing = {name: hooks for name, hooks in missing.items() if "reference-transaction" in hooks}
+    items.append(_item("git-хуки проєктів", WARN if missing else OK,
+                       f"без reference-transaction: {sorted(missing)}" if missing else "reference-transaction діє",
+                       "/keel:init-project у цьому репозиторії; перевір core.hooksPath"))
     return items
 
 

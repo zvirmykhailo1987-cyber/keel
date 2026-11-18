@@ -170,9 +170,27 @@ class TestProject(Base):
         self.assertIn("mine", hook.read_text(encoding="utf-8"))
 
     def test_husky_path_respected(self):
+        """pre-commit лишаємо менеджеру хуків, а reference-transaction ставимо туди, звідки git його запустить."""
         root = self.repo()
         subprocess.run(["git", "config", "core.hooksPath", ".husky"], cwd=root, check=True)
         self.assertEqual(project.hook_plan(root)["action"], "skip")
+        ref = project.hook_plan(root, "reference-transaction")
+        self.assertEqual((ref["action"], Path(ref["path"])), ("install", (root / ".husky" / "reference-transaction").resolve()))
+        self.assertIn("core.hooksPath", ref["note"])
+        project.apply(root, self.vault)
+        self.assertEqual(project.hook_status(root), {"pre-commit": False, "reference-transaction": True})
+        self.assertFalse((root / ".git" / "hooks" / "reference-transaction").exists())
+
+    def test_doctor_sees_hooks_disabled_by_hooks_path(self):
+        """core.hooksPath, заданий після init-project, тихо вимикає .git/hooks: лікар це бачить."""
+        root = self.repo()
+        project.apply(root, self.vault)
+        self.assertTrue(all(project.hook_status(root).values()))
+        status = lambda: next(i for i in doctor.check_vault(self.vault) if i["name"] == "git-хуки проєктів")["status"]
+        self.assertEqual(status(), "ok")
+        subprocess.run(["git", "config", "core.hooksPath", "elsewhere"], cwd=root, check=True)
+        self.assertEqual(project.hook_status(root)["reference-transaction"], False)
+        self.assertEqual(status(), "warn")
 
     def test_own_hook_removed(self):
         root = self.repo()
@@ -283,6 +301,40 @@ class TestPreCommitReal(Base):
         done = self.git("commit", "-qm", "ok")
         self.assertEqual(done.returncode, 0)
         self.assertIn("НЕ перевірено".encode(), done.stderr)
+
+
+class TestHooksPathReal(TestPreCommitReal):
+    """Те саме зі справжнім git, коли core.hooksPath задано до підключення (husky v8 і подібні)."""
+
+    def setUp(self):
+        Base.setUp(self)
+        self.root = self.tmp / "repo"
+        self.root.mkdir()
+        self.git = lambda *a: subprocess.run(["git", "-c", "user.email=t@t.test", "-c", "user.name=t", *a],
+                                             cwd=self.root, capture_output=True)
+        self.git("init", "-q")
+        self.git("config", "core.hooksPath", ".githooks")
+        write_json(self.tmp / ".keel" / "config.json", {"vault": str(self.vault.root)})
+        write_json(self.vault.current_file, {"plugin_root": str(Path(__file__).resolve().parents[2])})
+        project.apply(self.root, self.vault)
+
+    def test_ref_hook_lives_in_hooks_path(self):
+        self.assertTrue((self.root / ".githooks" / "reference-transaction").is_file())
+        self.assertFalse((self.root / ".githooks" / "pre-commit").exists())
+
+    # Без pre-commit у теці менеджера першим рубежем лишається хук Claude Code, а тут ловить reference-transaction.
+    def test_blocks_secret_and_passes_clean(self):
+        self.seed()
+        self.leak()
+        self.assertNotEqual(self.git("commit", "-qm", "bad").returncode, 0, "секрет")
+
+    def test_uninstall_removes_both_hooks(self):
+        self.assertTrue(project.remove_hook(self.root))
+        self.assertFalse((self.root / ".githooks" / "reference-transaction").exists())
+
+    def test_missing_plugin_warns_but_does_not_lock_repo(self):
+        write_json(self.vault.current_file, {"plugin_root": str(self.tmp / "немає")})
+        self.seed()
 
 
 class TestSession(Base):

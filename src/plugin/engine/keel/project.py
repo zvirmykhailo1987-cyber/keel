@@ -88,17 +88,40 @@ def _git_output(root: Path, *args: str) -> str | None:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
+def hooks_dir(root: Path) -> Path | None:
+    """Тека, з якої git справді запускає хуки: з урахуванням core.hooksPath і worktree."""
+    path = _git_output(root, "rev-parse", "--git-path", "hooks")
+    return None if path is None else (root / path).resolve()
+
+
 def hook_plan(root: Path, name: str = "pre-commit") -> dict:
-    """Не чіпаємо чужі менеджери хуків: core.hooksPath перебив би husky та pre-commit."""
-    git_dir = _git_output(root, "rev-parse", "--git-common-dir")
-    if git_dir is None:
+    """Чужий хук не переписуємо. Якщо core.hooksPath задано (husky чи подібне), git не дивиться в
+    .git/hooks, і хук там був би мертвим (G11). Тоді pre-commit лишаємо менеджеру хуків, а
+    reference-transaction ставимо в його теку: це окрема подія, менеджери її не займають, а без неї
+    зникає єдиний рубіж, що ловить коміти повз `git commit`."""
+    directory = hooks_dir(root)
+    if directory is None:
         return {"action": "skip", "reason": "не git-репозиторій"}
-    if _git_output(root, "config", "--get", "core.hooksPath"):
-        return {"action": "skip", "reason": "core.hooksPath уже задано (husky чи подібне): додай `python -m keel scan --staged` у свій хук"}
-    path = (root / git_dir).resolve() / "hooks" / name
+    custom = _git_output(root, "config", "--get", "core.hooksPath")
+    path = directory / name
     if path.exists() and MARKER not in path.read_text(encoding="utf-8", errors="ignore"):
         return {"action": "skip", "reason": f"уже є власний {path.name}: додай `python -m keel scan --staged` у нього"}
-    return {"action": "install", "path": str(path)}
+    if custom and name == "pre-commit" and not path.exists():
+        return {"action": "skip", "reason": f"core.hooksPath={custom} (husky чи подібне): додай `python -m keel scan --staged` у свій pre-commit"}
+    plan = {"action": "install", "path": str(path)}
+    if custom:
+        plan["note"] = f"core.hooksPath={custom}: хук ляже в цю теку, бо .git/hooks git не читає"
+    return plan
+
+
+def hook_status(root: Path) -> dict[str, bool]:
+    """Чи стоять хуки Keel там, звідки git їх запустить. Хук у .git/hooks при заданому core.hooksPath не рахується."""
+    directory = hooks_dir(root)
+    status = {}
+    for name in HOOKS:
+        path = directory / name if directory else None
+        status[name] = bool(path and path.is_file() and MARKER in path.read_text(encoding="utf-8", errors="ignore"))
+    return status
 
 
 def merged_settings(existing: dict, allow: list[str]) -> dict:
@@ -186,9 +209,11 @@ def remove_hook(root: Path) -> bool:
     if git_dir is None:
         return False
     removed = False
-    for name in HOOKS:
-        path = (root / git_dir).resolve() / "hooks" / name
-        if path.exists() and MARKER in path.read_text(encoding="utf-8", errors="ignore"):
-            path.unlink()
-            removed = True
+    places = {(root / git_dir).resolve() / "hooks", hooks_dir(root)}
+    for directory in filter(None, places):
+        for name in HOOKS:
+            path = directory / name
+            if path.exists() and MARKER in path.read_text(encoding="utf-8", errors="ignore"):
+                path.unlink()
+                removed = True
     return removed
