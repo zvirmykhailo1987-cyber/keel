@@ -84,9 +84,13 @@ def load_denylist(path: Path) -> list[str]:
     return terms
 
 
-def check_denylist(tree: Path, terms: list[str]) -> list[str]:
+def check_denylist(tree: Path, terms: list[str], public: list[str] = ()) -> list[str]:
     """Перевіряє і вміст, і імена файлів. У звіт іде номер терміна, а не значення:
-    звіт теж можуть переслати."""
+    звіт теж можуть переслати.
+
+    `public` це свідомо публічна ідентичність автора (ім'я, адреса репозиторію). Маскуються лише
+    ці точні рядки: той самий термін в іншому контексті, наприклад у поштовій адресі, лишається знахідкою."""
+    masks = sorted((p.lower() for p in public if p), key=len, reverse=True)
     # Межа зліва: корінь імені не має спрацьовувати всередині звичайного слова.
     patterns = [(i, re.compile(r"(?<![\w])" + re.escape(t.lower()))) for i, t in enumerate(terms)]
     hits: list[str] = []
@@ -96,6 +100,8 @@ def check_denylist(tree: Path, terms: list[str]) -> list[str]:
         rel = path.relative_to(tree).as_posix()
         haystacks = [rel.lower()]
         haystacks.append(path.read_bytes().decode("utf-8", errors="ignore").lower())
+        for mask in masks:
+            haystacks = [text.replace(mask, " " * len(mask)) for text in haystacks]
         for index, pattern in patterns:
             if any(pattern.search(text) for text in haystacks):
                 hits.append(f"{rel}: термін №{index}")
@@ -125,6 +131,14 @@ def apply_params(text: str, params: dict[str, str]) -> str:
     return text
 
 
+def manifest_description(src: Path) -> str:
+    return json.loads((src / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["description"]
+
+
+def public_identity(params: dict) -> list[str]:
+    return [str(v) for v in params.get("PUBLIC_IDENTITY", [])]
+
+
 def write_marketplace(dist: Path, params: dict[str, str], version: str) -> None:
     meta = dist / ".claude-plugin"
     meta.mkdir(parents=True)
@@ -133,7 +147,7 @@ def write_marketplace(dist: Path, params: dict[str, str], version: str) -> None:
         "owner": {"name": params["OWNER_NAME"]},
         "plugins": [{"name": params["PLUGIN_NAME"], "source": f"./plugins/{params['PLUGIN_NAME']}",
                      "version": version,
-                     "description": "Другий мозок для програміста: Radar, Brain, Growth, Autopilot, OSINT."}],
+                     "description": manifest_description(SRC)}],
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     (dist / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8", newline="\n")
     (dist / "README.md").write_bytes((SRC / "README.md").read_bytes().replace(b"\r\n", b"\n"))
@@ -177,13 +191,14 @@ def verify_zip(tree: Path, target: Path) -> str:
 
 
 def write_report(version: str, files: list[str], skipped: list[str], tree: Path, sha: str, tests: int,
-                 denylist_size: int, previous: set[str]) -> None:
+                 denylist_size: int, previous: set[str], identity_size: int = 0, repo_files: int = 0) -> None:
     current = set(files)
     lines = [
         f"# Звіт збірки Keel {version}", "",
         "Цей звіт треба прочитати ПЕРЕД будь-якою передачею. Збірка нічого не публікує.", "",
         "| Перевірка | Результат |", "|---|---|",
-        f"| Особисті маркери (термінів у denylist: {denylist_size}) | 0 збігів |",
+        f"| Особисті маркери (термінів у denylist: {denylist_size}; публічна ідентичність автора: {identity_size} рядки) | 0 збігів |",
+        f"| Ті самі маркери в усіх файлах git-репозиторію ({repo_files}) | 0 збігів |",
         "| Секрети | 0 знахідок |", "| CRLF, незаповнені підстановки, заборонені теки | 0 |",
         f"| Селфтести на дереві dist | {tests} пройдено |",
         f"| ZIP = дерево | так, SHA-256 `{sha}` |", "",
@@ -207,6 +222,8 @@ def build(denylist_path: Path, run_tests: bool = True) -> dict:
 
     config = tomllib.loads((ROOT / "build" / "allowlist.toml").read_text(encoding="utf-8"))
     params = tomllib.loads((ROOT / "build" / "params.toml").read_text(encoding="utf-8"))
+    identity = public_identity(params)
+    params = {k: v for k, v in params.items() if isinstance(v, str)}
     terms = load_denylist(denylist_path)
     manifest = json.loads((SRC / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     version = manifest["version"]
@@ -244,7 +261,7 @@ def build(denylist_path: Path, run_tests: bool = True) -> dict:
     errors = check_text_rules(tree_excluding_git.path)
     if errors:
         raise BuildError("правила тексту:\n" + "\n".join(errors[:30]))
-    hits = check_denylist(tree_excluding_git.path, terms)
+    hits = check_denylist(tree_excluding_git.path, terms, identity)
     if hits:
         raise BuildError("особисті маркери:\n" + "\n".join(hits[:50]))
     # Фікстури тестів сканера побудовано конкатенацією, тому в сирому тексті їх немає.
@@ -252,6 +269,9 @@ def build(denylist_path: Path, run_tests: bool = True) -> dict:
     if found:
         raise BuildError("секрети:\n" + "\n".join(f"{f.file}:{f.line} {f.type}" for f in found[:30]))
     tree_excluding_git.close()
+    repo_files, repo_hits = check_repo(terms, identity)
+    if repo_hits:
+        raise BuildError("особисті маркери в репозиторії:\n" + "\n".join(repo_hits[:50]))
     tests = run_selftests(plugin) if run_tests else 0
     if run_tests and tests == 0:
         raise BuildError("селфтести не запустились (Г52)")
@@ -259,8 +279,23 @@ def build(denylist_path: Path, run_tests: bool = True) -> dict:
     make_zip(pure.path, ZIP_PATH)
     sha = verify_zip(pure.path, ZIP_PATH)
     pure.close()
-    write_report(version, files, skipped, plugin, sha, tests, len(terms), previous)
+    write_report(version, files, skipped, plugin, sha, tests, len(terms), previous, len(identity), repo_files)
     return {"version": version, "files": len(files), "tests": tests, "sha256": sha, "report": str(REPORT)}
+
+
+def check_repo(terms: list[str], identity: list[str]) -> tuple[int, list[str]]:
+    """Публічний репозиторій це теж дистрибутив: та сама перевірка на всіх файлах, що в git."""
+    listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd=ROOT,
+                            capture_output=True, check=True).stdout.decode("utf-8").split("\0")
+    import tempfile  # noqa: PLC0415
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        names = [n for n in listed if n and (ROOT / n).is_file()]
+        for name in names:
+            target = tree / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / name).read_bytes())
+        return len(names), check_denylist(tree, terms, identity)
 
 
 class _Tree:
