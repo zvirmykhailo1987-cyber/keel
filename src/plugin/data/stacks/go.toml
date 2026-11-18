@@ -1,0 +1,19 @@
+name = "Go"
+markers = ["go.mod", "go.work"]
+eol = ["go"]
+watch = ["golang/go", "golangci/golangci-lint"]
+pitfalls = ["Помилка, проігнорована через _, ховає збій", "Горутина без скасування через context тече", "Запис у map без синхронізації падає в проді: тести з -race"]
+maturity = "profile"
+verified = "2026-11-06"
+
+[commands]
+test = "go test ./..."
+lint = "golangci-lint run"
+vet = "go vet ./..."
+build = "go build ./..."
+audit = "govulncheck ./..."
+
+[runtime_files]
+"go.mod" = "go|^go (\\d+\\.\\d+)"
+
+[frameworks]

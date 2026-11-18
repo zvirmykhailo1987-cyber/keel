@@ -1,0 +1,17 @@
+name = "C / C++"
+markers = ["CMakeLists.txt", "Makefile", "conanfile.txt", "conanfile.py", "vcpkg.json", "*.cpp", "*.c"]
+eol = []
+watch = ["llvm/llvm-project"]
+pitfalls = ["Radar бачить лише заявлені залежності: вендорні копії та системні бібліотеки поза його оком", "Запуск тестів без ASan/UBSan пропускає пам'ять", "Невизначена поведінка проходить тести й падає на іншому компіляторі"]
+maturity = "beta"
+verified = "2026-11-06"
+
+[commands]
+test = "ctest --test-dir build"
+build = "cmake --build build"
+lint = "clang-tidy"
+audit = "скан залежностей залежить від менеджера: conan/vcpkg"
+
+[runtime_files]
+
+[frameworks]

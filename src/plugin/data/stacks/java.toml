@@ -1,0 +1,17 @@
+name = "Java"
+markers = ["pom.xml", "build.gradle", "gradlew", "settings.gradle"]
+eol = []
+watch = ["spring-projects/spring-boot", "gradle/gradle"]
+pitfalls = ["Без lockfile транзитивні версії рухаються: Radar це позначить як неповну перевірку", "equals без hashCode ламає колекції", "Часові зони: LocalDateTime не містить зони"]
+maturity = "profile"
+verified = "2026-11-06"
+
+[commands]
+test = "mvn -q test  # або ./gradlew test"
+build = "mvn -q package  # або ./gradlew build"
+audit = "mvn org.owasp:dependency-check-maven:check"
+
+[runtime_files]
+
+[frameworks]
+"spring-boot" = ["org.springframework.boot:spring-boot-starter", "org.springframework.boot:spring-boot"]

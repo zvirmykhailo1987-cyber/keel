@@ -1,0 +1,96 @@
+# Каталог дій Keel. Tier 3 не має виконавця в коді: це не налаштування, а властивість програми.
+# Рушій не запуститься, якщо тут auto=true без виконавця, Tier 3 з auto або невідоме поле.
+
+[actions.add_note]
+tier = 1
+auto = true
+params = ["title", "body"]
+desc = "Нотатка у vault"
+
+[actions.add_lesson]
+tier = 1
+auto = true
+params = ["title", "body", "evidence"]
+desc = "Урок з ретро або ревʼю"
+
+[actions.add_fact]
+tier = 1
+auto = true
+params = ["claim", "url", "quote"]
+optional = ["second_url", "second_quote", "strong"]
+desc = "Факт: приймається лише з дослівною цитатою на сторінці джерела"
+
+[actions.draft_adr]
+tier = 1
+auto = true
+params = ["project", "title", "context", "decision", "consequences"]
+desc = "Чернетка ADR у теці проєкту у vault, у репозиторій не пишеться"
+
+[actions.update_codemap]
+tier = 1
+auto = true
+params = ["project", "body"]
+desc = "Карта кодової бази з прив'язкою до SHA"
+
+[actions.dep_patch_branch]
+tier = 2
+auto = true
+params = ["project", "ecosystem", "package", "from_version", "to_version"]
+desc = "Патч-оновлення в локальній гілці keel/*, у worktree, без злиття"
+
+[actions.merge_branch]
+tier = 3
+auto = false
+params = ["project", "branch"]
+human = "git switch main && git merge --no-ff {branch}"
+desc = "Злиття гілки"
+
+[actions.push_main]
+tier = 3
+auto = false
+params = ["project"]
+human = "git push origin main"
+desc = "Push у головну гілку"
+
+[actions.deploy]
+tier = 3
+auto = false
+params = ["project", "target"]
+desc = "Деплой"
+
+[actions.publish_package]
+tier = 3
+auto = false
+params = ["project", "registry"]
+desc = "Публікація пакета або сайту"
+
+[actions.prod_migration]
+tier = 3
+auto = false
+params = ["project", "migration"]
+desc = "Міграція робочої бази"
+
+[actions.rotate_secret]
+tier = 3
+auto = false
+params = ["name"]
+desc = "Ротація секрету"
+
+[actions.spend_money]
+tier = 3
+auto = false
+params = ["what", "amount"]
+desc = "Гроші або платний сервіс"
+
+[actions.send_message]
+tier = 3
+auto = false
+params = ["to", "subject"]
+desc = "Лист чи повідомлення людині"
+
+[actions.human_decision]
+tier = 3
+auto = false
+params = ["question"]
+optional = ["options"]
+desc = "Будь-яке інше рішення людини"

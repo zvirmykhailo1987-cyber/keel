@@ -1,0 +1,16 @@
+name = "Swift"
+markers = ["Package.swift", "*.xcodeproj", "Package.resolved"]
+eol = []
+watch = ["apple/swift", "realm/SwiftLint"]
+pitfalls = ["Force unwrap падає у проді", "Захоплення self без weak у замиканні тече пам'яттю", "Оновлення UI не з MainActor"]
+maturity = "beta"
+verified = "2026-11-06"
+
+[commands]
+test = "swift test"
+lint = "swiftlint"
+build = "swift build"
+
+[runtime_files]
+
+[frameworks]

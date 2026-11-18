@@ -1,0 +1,16 @@
+name = "Kotlin"
+markers = ["build.gradle.kts", "*.kt"]
+eol = ["kotlin"]
+watch = ["JetBrains/kotlin"]
+pitfalls = ["!! повертає NPE, від якого Kotlin рятував", "GlobalScope не прив'язаний до життєвого циклу", "Платформні типи з Java приховують null"]
+maturity = "profile"
+verified = "2026-11-06"
+
+[commands]
+test = "./gradlew test"
+lint = "./gradlew detekt"
+build = "./gradlew build"
+
+[runtime_files]
+
+[frameworks]

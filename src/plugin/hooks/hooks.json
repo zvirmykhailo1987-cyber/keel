@@ -1,0 +1,28 @@
+{
+  "description": "Keel: pre-flight на старті сесії та перевірка секретів перед записом і комітом",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" -m keel.session",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|mcp__.*__(run_in_terminal|start_process|interact_with_process|execute_command|run_command|write_file|edit_block|edit_file|move_file)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" -m keel.guard",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

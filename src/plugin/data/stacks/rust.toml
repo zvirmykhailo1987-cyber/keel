@@ -1,0 +1,20 @@
+name = "Rust"
+markers = ["Cargo.toml", "Cargo.lock"]
+eol = ["rust"]
+watch = ["rust-lang/rust", "rust-lang/rust-clippy"]
+pitfalls = ["unwrap() у бібліотеці перетворює помилку на паніку", "unsafe без задокументованого інваріанта", "Блокування в async-контексті зупиняє виконавець"]
+maturity = "profile"
+verified = "2026-11-06"
+
+[commands]
+test = "cargo test"
+lint = "cargo clippy -- -D warnings"
+format = "cargo fmt --check"
+build = "cargo build"
+audit = "cargo audit"
+
+[runtime_files]
+"rust-toolchain" = "rust|^(\\d+\\.\\d+)"
+"rust-toolchain.toml" = "rust|channel\\s*=\\s*\"(\\d+\\.\\d+)"
+
+[frameworks]

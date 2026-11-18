@@ -1,0 +1,20 @@
+name = "PHP"
+markers = ["composer.json", "composer.lock"]
+eol = ["php"]
+watch = ["php/php-src", "laravel/framework"]
+pitfalls = ["== порівнює з приведенням типів", "SQL без підготовлених запитів", "unserialize на чужих даних виконує код"]
+maturity = "profile"
+verified = "2026-11-06"
+
+[commands]
+test = "vendor/bin/phpunit"
+lint = "vendor/bin/phpstan analyse"
+format = "vendor/bin/php-cs-fixer fix --dry-run"
+audit = "composer audit"
+
+[runtime_files]
+".php-version" = "php|^(\\d+\\.\\d+)"
+
+[frameworks]
+"laravel" = ["laravel/framework"]
+"symfony" = ["symfony/framework-bundle"]

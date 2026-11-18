@@ -1,0 +1,18 @@
+name = "C# / .NET"
+markers = ["*.csproj", "*.sln", "global.json", "packages.lock.json"]
+eol = ["dotnet"]
+watch = ["dotnet/runtime", "dotnet/aspnetcore"]
+pitfalls = ["async void ховає винятки", "Без packages.lock.json версії неточні: увімкни RestorePackagesWithLockFile", ".Result на Task спричиняє взаємне блокування"]
+maturity = "profile"
+verified = "2026-11-06"
+
+[commands]
+test = "dotnet test"
+format = "dotnet format --verify-no-changes"
+build = "dotnet build"
+audit = "dotnet list package --vulnerable --include-transitive"
+
+[runtime_files]
+"global.json" = "dotnet|\"version\"\\s*:\\s*\"(\\d+\\.\\d+)"
+
+[frameworks]

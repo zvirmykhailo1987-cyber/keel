@@ -1,0 +1,26 @@
+name = "JavaScript / TypeScript"
+markers = ["package.json", "tsconfig.json", "pnpm-lock.yaml", "yarn.lock"]
+eol = []
+watch = ["microsoft/TypeScript", "nodejs/node", "vitejs/vite"]
+pitfalls = ["Скрипти встановлення запускають чужий код: ставити патчі з --ignore-scripts", "`any` і `as` вимикають перевірку саме там, де вона потрібна", "Необроблена відмова Promise у Node завершує процес", "Вимір до завершення рендеру бреше (G17)"]
+maturity = "profile"
+verified = "2026-11-06"
+
+[commands]
+test = "npm test"
+lint = "npx eslint ."
+types = "npx tsc --noEmit"
+build = "npm run build"
+audit = "npm audit --omit=dev"
+
+[runtime_files]
+".nvmrc" = "nodejs|^v?(\\d+)"
+".node-version" = "nodejs|^v?(\\d+)"
+
+[frameworks]
+"react" = ["react"]
+"nextjs" = ["next"]
+"angular" = ["@angular/core"]
+"vue" = ["vue"]
+"nuxt" = ["nuxt"]
+"express" = ["express"]

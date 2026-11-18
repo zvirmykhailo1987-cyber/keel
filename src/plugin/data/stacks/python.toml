@@ -1,0 +1,21 @@
+name = "Python"
+markers = ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile", "poetry.lock", "uv.lock"]
+eol = []
+watch = ["astral-sh/ruff", "astral-sh/uv", "pytest-dev/pytest"]
+pitfalls = ["Змінний дефолт аргументу живе між викликами", "Імпорт із побічним ефектом ламає чужий рантайм (G25)", "pandas: tz губиться в reindex(.values) (G57)", "open() без encoding на Windows читає cp1251 (G7)"]
+maturity = "profile"
+verified = "2026-11-06"
+
+[commands]
+test = "pytest -q"
+lint = "ruff check ."
+format = "ruff format --check ."
+types = "mypy ."
+audit = "pip-audit"
+
+[runtime_files]
+".python-version" = "python|^(\\d+\\.\\d+)"
+
+[frameworks]
+"django" = ["django", "Django"]
+"postgresql" = ["psycopg2", "psycopg", "psycopg2-binary"]

@@ -1,0 +1,15 @@
+{
+  "name": "keel",
+  "version": "0.1.0",
+  "description": "Другий мозок для програміста: Radar, Brain, Growth, Autopilot, OSINT і дисципліна доставки коду.",
+  "author": {"name": "Keel"},
+  "license": "UNLICENSED",
+  "userConfig": {
+    "vault_dir": {
+      "type": "directory",
+      "title": "Тека знань Keel",
+      "description": "Де зберігати особистий vault (Markdown + git). Порожньо означає ~/keel-vault.",
+      "required": false
+    }
+  }
+}

@@ -1,0 +1,4 @@
+# Підстановки {{NAME}} у текстах дистрибутива. Необроблена підстановка зупиняє збірку.
+PLUGIN_NAME = "keel"
+MARKETPLACE_NAME = "keel-marketplace"
+OWNER_NAME = "Keel"
