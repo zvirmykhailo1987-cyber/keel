@@ -57,7 +57,7 @@ _CONFIG_TAMPER = re.compile(rf"\bgit\b{_SEGMENT}(?:\bconfig\b|\s-c\s|\s--config-
 _CONFIG_READ = re.compile(r"\bconfig\s+(?:--get\S*|--list|-l|get|list)(?:\s|$)")
 # Windows знімає крапку в кінці сегмента, не зважає на регістр і знає імена 8.3: `.git.`, `.GIT`, `GIT~1`.
 _GIT_META = (r"(?:\S*[/\\])?(?:(?:\.git[. ]*|git~\d)[/\\]+(?:[^\s/\\]+[/\\]+)*(?:hooks|config)\b|"
-             r"\.gitconfig\b|(?:\.config|xdg\w*)[/\\]+git[/\\]+(?:config|attributes)\b)")
+             r"\.gitconfig(?![\w.])|(?:\.config|xdg[\w-]*)[/\\]+git[/\\]+(?:config|attributes)(?![\w.]))")
 _WRITERS = (r"(?:\b(?:rm|mv|cp|chmod|chown|tee|truncate|ln|dd|install|del|erase|ren|rename|rd|rmdir|move|copy|attrib|icacls|ri|"
             r"Remove-Item|Set-Content|Add-Content|Clear-Content|Out-File|Move-Item|Copy-Item|New-Item|Rename-Item)\b|"
             r"\bsed\s+-i|--output[=\s]|>)")
@@ -79,17 +79,21 @@ SEARCH_RUNS_PROGRAM = re.compile(rf"\brg\b{_SEGMENT}\s--pre(?:[=\s]|$)")
 HISTORY_PLUMBING = re.compile(
     rf"\bgit\b{_SEGMENT}\b(?:fast-import|commit-tree|update-ref)\b|"
     rf"\bgit\b{_SEGMENT}\bnotes\s+(?:--ref\S*\s+\S*\s*)?(?:add|append|copy|edit|merge|remove|prune)\b|"
-    rf"\bgit\b{_SEGMENT}\bam\b(?!{_SEGMENT}--(?:abort|skip|show-current-patch|quit))|"
+    rf"\bgit\b{_SEGMENT}(?<![-\w.])am\b(?!{_SEGMENT}--(?:abort|skip|show-current-patch|quit))|"  # не `commit -am`
     rf"\bgh\b{_SEGMENT}\brepo\s+create\b{_SEGMENT}\s--push\b")
 # `gh api` пише вміст на сервер повз git push. Поля (-f/-F/--input) без -X gh шле як POST.
-GH_API = re.compile(rf"\bgh\s+api\b({_SEGMENT})")
-_GH_WRITE_PATH = re.compile(r"(?:^|\s)/?(?:repos/[^\s/]+/[^\s/]+/(?:contents|git|releases)\b|gists\b|graphql\b)")
+GH_API = re.compile(rf"\bgh(?:\.exe)?\s+api\b({_SEGMENT})", re.I)
+_GH_WRITE_PATH = re.compile(r"(?:^|\s)/?(?:repos/[^\s/]+/[^\s/]+/(?:contents|git|releases)\b|gists\b|graphql\b)", re.I)
 _GH_METHOD = re.compile(r"(?:-X\s*|--method[\s=])(\w+)", re.I)
 _GH_FIELDS = re.compile(r"(?:^|\s)(?:-[fF]|--field|--raw-field|--input)(?:[\s=]|$)")
 _GH_GRAPHQL_WRITE = re.compile(r"\b(?:createCommitOnBranch|createRef|updateRefs?|mergeBranch)\b")
 # Публікує файли третій стороні повз push. Законно, але вирішує людина, бачачи, що саме йде.
 GH_PUBLISH = re.compile(rf"\bgh\b{_SEGMENT}\b(?:gist\s+(?:create|new|edit)|release\s+(?:create|new|upload))\b")
-_GIT_APPLY = re.compile(rf"\bgit\b(?:(?!\bstash\b)[^;&|\n])*\bapply\b({_SEGMENT})")  # `git stash apply` не патч
+# Лише підкоманда `apply` (після глобальних опцій git), а не слово в шляху, гілці чи `stash apply`.
+_GIT_APPLY = re.compile(rf"\bgit(?:\.exe)?(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?|-\w+))*\s+apply\b({_SEGMENT})")
+_PRAGMA_WORD = re.compile(r"(?i)secret-scan")
+_PRAGMA_WRITE = re.compile(rf"(?i){_WRITERS}|\.write\w*\s*\(|\bopen\s*\(")
+_KEEL_HOOK_NAMES = ("pre-commit", "reference-transaction")
 # Вихідний канал усередині git (обхід К9-05): код іде третій стороні листом без жодного push,
 # тому гейт коміту/пушу його не бачить. Лист третій стороні вирішує людина. `git -c … send-email`
 # і `git-send-email` ловляться тим самим шаблоном; довідку (`git help send-email`, `--help`) не чіпаємо.
@@ -152,10 +156,28 @@ def _is_git_control_file(path: Path) -> bool:
     parts = [p.rstrip(". ").casefold() for p in path.parts]
     if parts and parts[-1] == ".gitconfig":
         return True
-    if len(parts) >= 2 and parts[-2] == "git" and parts[-1] in {"config", "attributes"}:
+    if len(parts) >= 3 and parts[-2] == "git" and parts[-1] in {"config", "attributes"} and (
+            parts[-3] == ".config" or parts[-3].startswith("xdg")):
         return True  # $XDG_CONFIG_HOME/git/config: глобальний конфіг, той самий core.hooksPath
     for index, part in enumerate(parts[:-1]):
         if re.fullmatch(r"\.git|git~\d", part) and any(p == "hooks" or p.startswith("config") for p in parts[index + 1:]):
+            return True
+    return False
+
+
+def _is_keel_hook(path: Path) -> bool:
+    """Хук Keel у теці core.hooksPath не лежить у .git, тому шлях його не видає: дивимось на мітку у файлі."""
+    try:
+        return path.name in _KEEL_HOOK_NAMES and path.is_file() and "keel-managed" in path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+
+
+def _touches_keel_hook(text: str, cwd: Path) -> bool:
+    if not re.search(_WRITERS, text, re.I):
+        return False
+    for word in re.findall(r"[^\s;&|<>'\"]*(?:pre-commit|reference-transaction)\b", text):
+        if _is_keel_hook(cwd / Path(word).expanduser()):
             return True
     return False
 
@@ -170,7 +192,7 @@ def check_write(name: str, tool_input: dict, vault: Vault) -> None:
     if target and _protected(Path(target), vault):
         raise Blocked("Стан Keel змінює лише код рушія, а не модель. "
                       "Рішення приймає людина через /keel:decide.")
-    if target and _is_git_control_file(Path(target)):
+    if target and (_is_git_control_file(Path(target)) or _is_keel_hook(Path(target))):
         raise Blocked("Keel заблокував запис у .git/hooks або .git/config. Це робить людина.")
     if target and _is_agent_config(Path(target)):
         raise AskHuman("Зміна конфігу агента (хуки, дозволи, MCP): вирішує людина.")
@@ -178,8 +200,15 @@ def check_write(name: str, tool_input: dict, vault: Vault) -> None:
     found = secretscan.scan_text(content, target or "<new>")
     if found and not (target and secretscan.is_git_ignored(Path(target))):
         raise Blocked(_report(found, target))
-    if secretscan.PRAGMA.search(content) and not secretscan.PRAGMA.search(_old_content(name, tool_input, target)):
+    if _adds_pragma(content, _old_content(name, tool_input, target)):
         raise AskHuman("Нова прагма `secret-scan: ignore` вимикає частину перевірки секретів: фікстуру позначає людина.")
+
+
+def _adds_pragma(new: str, old: str) -> bool:
+    """Нова прагма, ще одна прагма або прагма, перенесена в перші 5 рядків (там вона діє на весь файл)."""
+    head = lambda text: "\n".join(text.splitlines()[:5])  # noqa: E731
+    count = lambda text: len(secretscan.PRAGMA.findall(text))  # noqa: E731
+    return count(new) > count(old) or (bool(secretscan.PRAGMA.search(head(new))) and not secretscan.PRAGMA.search(head(old)))
 
 
 def _old_content(name: str, tool_input: dict, target: str) -> str:
@@ -381,16 +410,16 @@ def check_shell(raw_command: str, cwd: Path, powershell: bool = False, indirect:
         raise Blocked("Keel не може прочитати закодовану команду. Напиши її відкрито або спитай людину.")
     if AGENT_BYPASS.search(text):
         raise Blocked("Keel заблокував запуск агента без дозволів чи хуків. Це робить людина у своєму терміналі.")
-    if PRAGMA_TAMPER.search(text):
+    if PRAGMA_TAMPER.search(text) or (_PRAGMA_WORD.search(raw_command) and _PRAGMA_WRITE.search(raw_command)):
         raise Blocked("Keel заблокував дописування прагми `secret-scan: ignore` командою. Фікстуру позначає людина.")
     if SEARCH_RUNS_PROGRAM.search(text):
         raise Blocked("Keel заблокував `rg --pre`: пошук запускав би програму. Спитай людину.")
     if AGENT_CONFIG.search(text):
         raise AskHuman("Нова поверхня інструментів чи зміна конфігу агента: вирішує людина.")
     tampering = [m for m in _CONFIG_TAMPER.finditer(text) if not _CONFIG_READ.search(m.group(0))]
-    if tampering or HOOK_FILES.search(text) or ENV_TAMPER.search(text):
+    if tampering or HOOK_FILES.search(text) or ENV_TAMPER.search(text) or _touches_keel_hook(text, cwd):
         raise Blocked("Keel заблокував зміну git-хуків чи конфігурації, якою їх можна обійти. Це робить людина.")
-    if HISTORY_PLUMBING.search(text) or _gh_api_writes(text, raw_command):
+    if HISTORY_PLUMBING.search(text) or _gh_api_writes(text, raw_command) or _gh_api_writes(re.sub(r"[\"']", "", raw_command), raw_command):
         raise Blocked("Keel заблокував запис історії повз `git commit`: перевірити вміст неможливо. Це робить людина.")
     if GH_PUBLISH.search(text):
         raise AskHuman("`gh gist`/`gh release` публікує файли повз push і перевірку секретів: вирішує людина.")
@@ -428,8 +457,11 @@ def _gh_api_writes(text: str, raw_command: str) -> bool:
         args = match.group(1)
         if not _GH_WRITE_PATH.search(args):
             continue
-        if re.search(r"(?:^|\s)/?graphql\b", args) and not _GH_GRAPHQL_WRITE.search(raw_command):
-            continue  # graphql-запити читання: текст запиту в лапках, тож дивимось у сиру команду
+        if re.search(r"(?:^|\s)/?graphql\b", args):
+            # Текст запиту в лапках, тож дивимось у сиру команду. Запит із файлу прочитати не можемо.
+            if _GH_GRAPHQL_WRITE.search(raw_command) or re.search(r"=@|--input\b", args):
+                return True
+            continue
         method = _GH_METHOD.search(args)
         if (method.group(1).upper() in {"PUT", "POST", "PATCH"}) if method else _GH_FIELDS.search(args):
             return True
@@ -476,7 +508,7 @@ def _shell_request(name: str, tool_input: dict, cwd: str) -> ShellRequest | None
 def _check_move(tool_input: dict, vault: Vault) -> None:
     for key in ("source", "destination"):
         target = Path(str(tool_input.get(key) or ""))
-        if _is_git_control_file(target) or _protected(target, vault):
+        if _is_git_control_file(target) or _is_keel_hook(target) or _protected(target, vault):
             raise Blocked("Keel заблокував переміщення git-хуків, конфігу або стану Keel. Це робить людина.")
 
 
@@ -488,8 +520,7 @@ def decide(payload: dict, vault: Vault) -> None:
     elif MCP_WRITE.fullmatch(name):
         # Назви полів у MCP різні, тому сканується кожне текстове поле, а не лише `content`.
         target = next((str(tool_input[k]) for k in _PATH_KEYS if tool_input.get(k)), "")
-        content = "\n".join(str(v) for k, v in tool_input.items()
-                             if k not in _PATH_KEYS and k != "old_string" and isinstance(v, (str, int, float)))
+        content = "\n".join(_strings({k: v for k, v in tool_input.items() if k not in _PATH_KEYS and k != "old_string"}))
         if "old_string" in tool_input:
             check_write("Edit", {"file_path": target, "new_string": content,
                                  "old_string": str(tool_input.get("old_string") or "")}, vault)
@@ -501,6 +532,15 @@ def decide(payload: dict, vault: Vault) -> None:
         request = _shell_request(name, tool_input, payload.get("cwd") or ".")
         if request:
             check_shell(request.command, Path(request.cwd), request.powershell, request.indirect)
+
+
+def _strings(value) -> list[str]:
+    """Усі текстові значення, зокрема вкладені: `edits: [{"newText": ...}]` у filesystem-MCP."""
+    if isinstance(value, dict):
+        return [s for v in value.values() for s in _strings(v)]
+    if isinstance(value, (list, tuple)):
+        return [s for v in value for s in _strings(v)]
+    return [str(value)] if isinstance(value, (str, int, float)) else []
 
 
 def must_fail_closed(payload: dict) -> bool:

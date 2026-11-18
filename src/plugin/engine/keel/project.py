@@ -104,6 +104,11 @@ def hook_plan(root: Path, name: str = "pre-commit") -> dict:
         return {"action": "skip", "reason": "не git-репозиторій"}
     custom = _git_output(root, "config", "--get", "core.hooksPath")
     path = directory / name
+    if custom and not directory.is_relative_to(root.resolve()):
+        # Спільна тека хуків (глобальний core.hooksPath) обслуговує й чужі репозиторії: хук, поставлений
+        # «для цього», діяв би й там, а видалення забрало б його в усіх.
+        return {"action": "skip", "reason": f"core.hooksPath={custom} поза репозиторієм, тека спільна для інших репо: "
+                                             f"додай `python -m keel scan --ref-update` у свій {name}"}
     if path.exists() and MARKER not in path.read_text(encoding="utf-8", errors="ignore"):
         return {"action": "skip", "reason": f"уже є власний {path.name}: додай `python -m keel scan --staged` у нього"}
     if custom and name == "pre-commit" and not path.exists():
@@ -198,10 +203,29 @@ def apply(root: Path, vault: Vault, local_settings: bool = False) -> dict:
             path = Path(hook["path"])
             write_text(path, content)
             path.chmod(0o755)
+            _exclude_locally(root, path)
     projects = read_json(vault.projects_file) or {}
     projects[details["project"]] = str(root)
     write_json(vault.projects_file, projects)
     return details
+
+
+def _exclude_locally(root: Path, path: Path) -> None:
+    """Хук у теці core.hooksPath усередині репозиторію не має піти в спільний коміт команди.
+    Пишемо в .git/info/exclude, а не в .gitignore: це локальне правило, яке нікому не комітиться."""
+    try:
+        relative = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return
+    if relative.startswith(".git/"):
+        return
+    info = _git_output(root, "rev-parse", "--git-path", "info/exclude")
+    if info is None:
+        return
+    exclude = (root / info).resolve()
+    lines = exclude.read_text(encoding="utf-8", errors="ignore").splitlines() if exclude.exists() else []
+    if f"/{relative}" not in lines:
+        write_text(exclude, "\n".join([*lines, f"/{relative}"]) + "\n")
 
 
 def remove_hook(root: Path) -> bool:

@@ -570,6 +570,74 @@ class TestBypassResearch(unittest.TestCase):
             self.assertEqual(self.bash(command), 0, command)
         self.assertEqual(self.write("# notes", "docs/gitconfig.md"), 0)
 
+    # --- знахідки незалежного рецензента (18.11.2026): кожна стала тестом ---
+    def test_keel_hook_in_hooks_path_is_protected(self):
+        hook = self.repo / ".husky" / "reference-transaction"
+        hook.parent.mkdir()
+        hook.write_text("#!/bin/sh\n# keel-managed: test\n", encoding="utf-8")
+        (self.repo / ".husky" / "pre-commit").write_text("#!/bin/sh\nnpm test\n", encoding="utf-8")
+        self.assertEqual(self.write("exit 0", ".husky/reference-transaction"), 2)
+        for command in ("rm .husky/reference-transaction", "echo 'exit 0' > .husky/reference-transaction",
+                        "mv .husky/reference-transaction /tmp/x"):
+            self.assertEqual(self.bash(command), 2, command)
+        self.assertEqual(self.mcp("mcp__fs__move_file", source=str(hook), destination=str(self.tmp / "x")), 2)
+        self.assertEqual(self.bash("cat .husky/reference-transaction"), 0)
+        self.assertEqual(self.write("#!/bin/sh\nnpm run lint\n", ".husky/pre-commit"), 0, "чужий хук менеджера не наш")
+
+    def test_utf16_secret_is_seen(self):
+        self.dirty_worktree()
+        (self.repo / "s.py").unlink()
+        (self.repo / "creds.txt").write_bytes(("key=" + AWS + "\n").encode("utf-16"))
+        self.assertEqual(self.bash("git add -A && git commit -m wip"), 2)
+        git(self.repo, "add", "creds.txt")
+        self.assertTrue(secretscan.scan_staged(self.repo), "pre-commit і reference-transaction теж мають бачити")
+        (self.repo / "creds.txt").write_bytes("plain text\n".encode("utf-16"))
+        git(self.repo, "add", "creds.txt")
+        self.assertEqual(self.bash("git commit -m wip"), 0)
+
+    def test_mcp_nested_fields_are_scanned(self):
+        edits = [{"oldText": "a", "newText": f"k = '{AWS}'"}]
+        self.assertEqual(self.mcp("mcp__filesystem__edit_file", path=str(self.repo / "a.py"), edits=edits), 2)
+        self.assertEqual(self.mcp("mcp__filesystem__edit_file", path=str(self.repo / "a.py"),
+                                  edits=[{"oldText": "a", "newText": "b"}]), 0)
+
+    def test_gh_api_spellings(self):
+        for command in ("gh.exe api repos/o/r/contents/a.txt -X PUT -f content=x",
+                        "gh api graphql -F query=@mut.graphql", "gh api graphql --input body.json",
+                        "bash -c 'gh api repos/{owner}/{repo}/contents/a.txt -f content=x'"):
+            self.assertEqual(self.bash(command), 2, command)
+        self.assertEqual(self.bash("gh.exe api repos/o/r/contents/a.txt"), 0)
+
+    def test_pragma_written_through_heredoc_or_code(self):
+        for command in ("cat >> conf.py <<'EOF'\nx = 1  # secret-scan: ignore\nEOF",
+                        "python -c \"open('c.py','a').write('# secret-scan: ' + 'ignore')\""):
+            self.assertEqual(self.bash(command), 2, command)
+        self.assertEqual(self.bash("grep -rn 'secret-scan' src | head"), 0)
+
+    def test_pragma_moved_into_header_or_added_again(self):
+        (self.repo / "f.py").write_text("x = 1\ny = 2\nz = 3\nw = 4\nv = 5\nu = 6  # secret-scan: ignore\n", encoding="utf-8")
+        self.assertTrue(self.asked("Write", file_path=str(self.repo / "f.py"), content="# secret-scan: ignore\nx = 1"))
+        self.assertTrue(self.asked("Edit", file_path=str(self.repo / "f.py"), old_string="u = 6  # secret-scan: ignore",
+                                   new_string="u = 6  # secret-scan: ignore\nt = 7  # secret-scan: ignore"))
+
+    def test_ordinary_commits_with_apply_or_am_in_words(self):
+        (self.repo / "apply").mkdir()
+        (self.repo / "apply" / "h.py").write_text("x = 1\n", encoding="utf-8")
+        for command in ("git add apply/h.py && git commit -m wip", "git add apply && git commit -m x",
+                        "git switch -c fix/apply-theme && git commit -a -m wip", "git log --grep apply; git commit -m wip",
+                        "git commit -am wip", "git commit -a -m 'I am done'"):
+            self.assertEqual(self.bash(command), 0, command)
+
+    def test_config_lookalike_paths_are_not_blocked(self):
+        self.assertEqual(self.write("[core]", "dotfiles/git/config"), 0)
+        self.assertEqual(self.write("[core]", "src/vcs/git/attributes"), 0)
+        self.assertEqual(self.bash("cp .gitconfig.example .gitconfig.bak"), 0)
+        self.assertEqual(self.bash("cp .gitconfig.example ~/.gitconfig"), 2)
+
+    def test_split_finding_points_at_the_key_line(self):
+        text = f'a = "x" + "y"\nb = 1\nc = 2\nk = "{AWS[:4]}" + "{AWS[4:]}"\n'
+        self.assertEqual([(f.line, f.type) for f in secretscan.scan_text(text)], [(4, "aws-access-key (split)")])
+
     def test_padding_does_not_hide_commit(self):  # №18: deny-правила CC деградують після 50 підкоманд, хук ні
         self.dirty_worktree()
         self.assertEqual(self.bash("true && " * 60 + "git add . && git commit -m x"), 2)

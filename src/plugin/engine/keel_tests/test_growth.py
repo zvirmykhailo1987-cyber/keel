@@ -180,6 +180,20 @@ class TestProject(Base):
         project.apply(root, self.vault)
         self.assertEqual(project.hook_status(root), {"pre-commit": False, "reference-transaction": True})
         self.assertFalse((root / ".git" / "hooks" / "reference-transaction").exists())
+        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=root,
+                                capture_output=True, text=True).stdout
+        self.assertNotIn("reference-transaction", status, "хук не має піти в коміт команди")
+
+    def test_shared_hooks_path_outside_repo_is_left_alone(self):
+        """Глобальна тека хуків обслуговує всі репозиторії: ставити туди хук «для одного» не можна."""
+        root = self.repo()
+        shared = self.tmp / "shared-hooks"
+        subprocess.run(["git", "config", "core.hooksPath", str(shared)], cwd=root, check=True)
+        plan = project.hook_plan(root, "reference-transaction")
+        self.assertEqual(plan["action"], "skip")
+        self.assertIn("спільна", plan["reason"])
+        project.apply(root, self.vault)
+        self.assertFalse((shared / "reference-transaction").exists())
 
     def test_doctor_sees_hooks_disabled_by_hooks_path(self):
         """core.hooksPath, заданий після init-project, тихо вимикає .git/hooks: лікар це бачить."""
