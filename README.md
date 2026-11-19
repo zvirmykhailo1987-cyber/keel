@@ -9,6 +9,12 @@ Keel is a "second brain" for developers: a layered secret gate around every writ
 
 > **Status: PRELIMINARY, beta.** The engine self-tests run in CI on Ubuntu, Windows and macOS with Python 3.11 and 3.13. Real quota consumption and usefulness on large codebases have not been measured yet. Runtime messages, agent prompts and skills are written in Ukrainian, the author's working language; code, manifests and this documentation are in English.
 
+### What this repository is, and what it is not
+
+Keel is the portable, self-contained layer of the harness I use every day: the guards, the dependency radar and the vault that any developer can install without my help. It is deliberately a starting point.
+
+The full harness behind my own delivery work stays private: the skill library and task agents, the registry of failure patterns learned from retrospectives, the release gates per project type, and the autopilot that changes a skill only through a branch, self-tests, an old-versus-new behaviour eval and a trial period with automatic revert. Fitting that to a team's repositories, constraints and NDA is the part that cannot be packaged; I do it as part of an engagement. Contact: [mykhailo-zvir.pages.dev](https://mykhailo-zvir.pages.dev).
+
 ## Why
 
 An agent with a shell can commit a token, push it, or move a branch with `git commit-tree` + `git update-ref` so that no `pre-commit` hook ever runs. Pattern-matching the command text alone cannot answer "is this a commit?" — there are endless spellings (`g?t`, `$'\x67it'`, `sh -c`, MCP terminals, `gh api`). Keel therefore stacks independent gates and treats each one as a safety net, not a boundary:
