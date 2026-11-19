@@ -7,7 +7,7 @@
 
 Keel is a "second brain" for developers: a layered secret gate around every write, shell command and git ref update, a dependency radar (OSV, registries, end-of-life), a personal knowledge vault, and a tiered autopilot whose most dangerous tier has *no executor in the code at all*.
 
-> **Status: PRELIMINARY, beta.** The engine is covered by self-tests on Windows and Linux (CI matrix below). Real quota consumption, macOS, and usefulness on large codebases have not been measured yet. Runtime messages, agent prompts and skills are written in Ukrainian, the author's working language; code, manifests and this documentation are in English.
+> **Status: PRELIMINARY, beta.** The engine self-tests run in CI on Ubuntu, Windows and macOS with Python 3.11 and 3.13. Real quota consumption and usefulness on large codebases have not been measured yet. Runtime messages, agent prompts and skills are written in Ukrainian, the author's working language; code, manifests and this documentation are in English.
 
 ## Why
 
