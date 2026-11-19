@@ -1,0 +1,127 @@
+{
+  "measured": "2026-11-19",
+  "bugs_injected": 20,
+  "caught": 20,
+  "results": [
+    {
+      "bug": "--no-verify on push/merge/rebase is no longer seen",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_hook_bypass_flags_blocked_in_every_form"
+    },
+    {
+      "bug": "`git commit -n` (short flag cluster) is no longer seen",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_hook_bypass_flags_blocked_in_every_form"
+    },
+    {
+      "bug": "`git commit-tree` writes history unseen",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_history_written_without_commit_command"
+    },
+    {
+      "bug": "`git update-ref` moves a branch unseen",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_history_written_without_commit_command"
+    },
+    {
+      "bug": "`git am` applies mail patches unseen",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_history_written_without_commit_command"
+    },
+    {
+      "bug": "A patch applied before the commit is not read",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.TestBypassResearch.test_git_apply_reverse_reads_removed_lines"
+    },
+    {
+      "bug": "`git send-email` sends code out unseen",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.TestRiskyBranches.test_outbound_git_mail_blocked_but_help_is_not"
+    },
+    {
+      "bug": "core.hooksPath can be redirected",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_hook_tampering_blocked"
+    },
+    {
+      "bug": "`git config <key>` is no longer seen as tampering",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_hook_tampering_blocked"
+    },
+    {
+      "bug": "KEEL_ALLOW_SECRET can be set by the model",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_mcp_terminals_are_covered"
+    },
+    {
+      "bug": "`gh api -X PATCH` writes refs unseen",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.TestRiskyBranches.test_history_plumbing_remaining_spellings"
+    },
+    {
+      "bug": "A notebook cell is not scanned",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.TestRiskyBranches.test_notebook_cell_is_scanned"
+    },
+    {
+      "bug": "A crashed check becomes a pass",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.TestBypassResearch.test_slow_check_becomes_a_block"
+    },
+    {
+      "bug": "A checker error lets a write or commit through",
+      "file": "src/plugin/engine/keel/guard.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_commit_outside_repo_fails_closed"
+    },
+    {
+      "bug": "A key split into joined literals is missed",
+      "file": "src/plugin/engine/keel/secretscan.py",
+      "caught": true,
+      "caught_by": "test_guard.TestBypassResearch.test_split_finding_points_at_the_key_line"
+    },
+    {
+      "bug": "A base64/hex-encoded key is missed",
+      "file": "src/plugin/engine/keel/secretscan.py",
+      "caught": true,
+      "caught_by": "test_guard.TestBypassResearch.test_encoded_secret"
+    },
+    {
+      "bug": "UTF-16 without BOM (NUL between letters) is missed",
+      "file": "src/plugin/engine/keel/secretscan.py",
+      "caught": true,
+      "caught_by": "test_guard.TestBypassResearch.test_utf16_secret_is_seen"
+    },
+    {
+      "bug": "UTF-16 with BOM is read as UTF-8",
+      "file": "src/plugin/engine/keel/secretscan.py",
+      "caught": true,
+      "caught_by": "test_guard.TestRiskyBranches.test_scan_paths_reads_utf16_bom_and_skips_vendor_dirs"
+    },
+    {
+      "bug": "Untracked files are skipped by `git add . && git commit`",
+      "file": "src/plugin/engine/keel/secretscan.py",
+      "caught": true,
+      "caught_by": "test_guard.GuardCase.test_add_and_commit_in_one_command"
+    },
+    {
+      "bug": "Commits outside every branch are not checked on ref update",
+      "file": "src/plugin/engine/keel/secretscan.py",
+      "caught": true,
+      "caught_by": "test_guard.TestRiskyBranches.test_ref_update_sees_commits_outside_any_branch"
+    }
+  ]
+}

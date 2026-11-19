@@ -1,0 +1,13 @@
+# Dev-only: coverage.py measures the self-tests. The plugin itself stays stdlib-only at runtime.
+[run]
+branch = True
+source = src/plugin/engine/keel
+# Hooks, the guard watchdog child and the tick shim run as separate Python processes; count them too.
+patch = subprocess
+parallel = True
+data_file = .coverage
+
+[report]
+show_missing = True
+skip_covered = False
+precision = 1

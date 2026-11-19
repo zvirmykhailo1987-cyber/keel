@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -70,6 +71,14 @@ class TestCatalog(unittest.TestCase):
         spec = {"actions": {"x": {"tier": 1}, "human_decision": {"tier": 3, "auto": False}}}
         with self.assertRaises(catalog.CatalogError):
             catalog.validate(spec, {"x"})
+
+    def test_tier_outside_range_or_missing_fallback_refuses(self):
+        """Tier 4 чи "3" (рядок) оминули б перевірку `tier >= 3`; без human_decision незрозуміле не має куди піти."""
+        for tier in (4, -1, "3", None):
+            with self.assertRaises(catalog.CatalogError, msg=tier):
+                catalog.validate(self.spec(tier=tier, auto=False), set())
+        with self.assertRaises(catalog.CatalogError):
+            catalog.validate({"actions": {"x": {"tier": 1, "auto": False}}}, set())
 
     def test_executor_outside_catalog_refuses(self):
         with self.assertRaises(catalog.CatalogError):
@@ -183,6 +192,27 @@ class TestExecutor(Base):
         outcome = self.ex.propose({"action": "add_note", "confidence": 1, "params": {"title": "Зовсім нова тема", "body": "x"}})
         self.assertEqual(outcome["result"], "card")
         self.assertIn("відкат", outcome["reason"])
+
+    def test_approved_low_confidence_card_executes_once_and_closes(self):
+        """Шлях людини для Tier 1: схвалена картка виконується кодом і закривається, а не висить."""
+        created = self.ex.propose(self.note(0.5))
+        card = Cards(self.vault).resolve(created["card"], "approved", "human")
+        outcome = self.ex.apply_approved(card)
+        self.assertEqual(outcome["result"], "executed")
+        self.assertTrue((self.vault.root / outcome["path"]).exists())
+        self.assertEqual(Cards(self.vault).all()[created["card"]]["status"], "done")
+
+    def test_tier_without_executor_stays_with_human(self):
+        """Tier 1-2 без виконавця (auto=false) законний у каталозі, але виконати його нічим: лише картка й команда."""
+        spec = tomllib.loads((ENGINE.parent / "data" / "actions.toml").read_text(encoding="utf-8"))
+        spec["actions"]["manual_step"] = {"tier": 2, "auto": False, "params": ["project"], "human": "make release {project}"}
+        self.ex.actions = catalog.validate(spec, set(self.ex.executors))
+        created = self.ex.propose({"action": "manual_step", "params": {"project": "p"}, "confidence": 1.0})
+        self.assertEqual(created["result"], "card")
+        self.assertIn("рішення людини", created["reason"])
+        card = Cards(self.vault).resolve(created["card"], "approved", "human")
+        self.assertEqual(self.ex.apply_approved(card), {"result": "human", "command": "make release p"})
+        self.assertEqual(self.ex.apply_approved({**card, "action": "vanished_action"})["result"], "human")
 
 
 class TestFacts(Base):

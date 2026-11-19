@@ -4,4 +4,4 @@ MARKETPLACE_NAME = "keel-marketplace"
 OWNER_NAME = "Mykhailo Zvir"
 # Свідомо публічна ідентичність автора: маскується в перевірці denylist лише як точний рядок.
 # Пошта автора сюди не входить і лишається забороненою.
-PUBLIC_IDENTITY = ["Mykhailo Zvir", "github.com/zvirmykhailo1987-cyber", "281940193+zvirmykhailo1987-cyber@users.noreply.github.com", "zvirmykhailo1987-cyber/keel"]
+PUBLIC_IDENTITY = ["Mykhailo Zvir", "github.com/zvirmykhailo1987-cyber", "281940193+zvirmykhailo1987-cyber@users.noreply.github.com", "zvirmykhailo1987-cyber/keel", "mykhailo-zvir.pages.dev"]

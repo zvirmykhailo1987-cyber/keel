@@ -724,5 +724,165 @@ class TestBypassResearch(unittest.TestCase):
         self.assertFalse(self.asked("Write", file_path=str(self.repo / "f.py"), content="x = 1"))
 
 
+class TestRiskyBranches(unittest.TestCase):
+    """Гілки, які branch-coverage показав неперевіреними (19.11.2026). Кожен тест ловить пропуск, а не рядок."""
+    setUp, run_hook, write, bash = GuardCase.setUp, GuardCase.run_hook, GuardCase.write, GuardCase.bash
+    dirty_worktree, mcp, asked = GuardCase.dirty_worktree, GuardCase.mcp, GuardCase.asked
+
+    def staged_clean(self):
+        (self.repo / "ok.py").write_text("x = 1\n", encoding="utf-8")
+        git(self.repo, "add", "ok.py")
+
+    # --- сканер: шляхи, якими ходить `keel scan .` і хук reference-transaction ---
+    def test_scan_paths_reads_utf16_bom_and_skips_vendor_dirs(self):
+        """PowerShell 5.1 `>` пише UTF-16 з BOM: без декодування ключ розсипається на байти з NUL."""
+        (self.repo / "out.txt").write_bytes(("token: " + GH + "\n").encode("utf-16"))
+        vendored = self.repo / "node_modules" / "pkg"
+        vendored.mkdir(parents=True)
+        (vendored / "index.js").write_text(f"const k = '{GH}'\n", encoding="utf-8")
+        found = secretscan.scan_paths([self.repo])
+        self.assertEqual([(Path(f.file).name, f.type) for f in found], [("out.txt", "github-token")])
+        self.assertEqual([f.type for f in secretscan.scan_paths([self.repo / "out.txt"])], ["github-token"])
+        # Кирилиця в UTF-16 не дає NUL-байтів, тож евристика «багато NUL» не спрацює: ключ видно лише через BOM.
+        (self.repo / "out.txt").write_bytes(("Звіт " * 120 + "\ntoken: " + GH + "\n").encode("utf-16"))
+        self.assertEqual([f.type for f in secretscan.scan_paths([self.repo / "out.txt"])], ["github-token"])
+
+    def test_oversized_file_is_scanned_from_the_start_and_says_so(self):
+        big = self.repo / "big.bin"
+        big.write_bytes(GH.encode() + b"\n" + b"0" * 5000)
+        err = io.StringIO()
+        with mock.patch.object(secretscan, "MAX_SCAN", 1000), mock.patch("sys.stderr", err):
+            found = secretscan.scan_paths([big])
+        self.assertEqual([f.type for f in found], ["github-token"])
+        self.assertIn("big.bin", err.getvalue(), "обрізання не має бути мовчазним (G43)")
+
+    def test_ref_update_sees_commits_outside_any_branch(self):
+        """`git commit-tree` + `update-ref`: коміт не в жодній гілці, але reference-transaction його бачить."""
+        self.dirty_worktree()
+        git(self.repo, "add", "s.py")
+        tree = subprocess.run(["git", "write-tree"], cwd=self.repo, capture_output=True, text=True, check=True).stdout.strip()
+        new = subprocess.run(["git", "-c", "user.email=t@t.test", "-c", "user.name=t", "commit-tree", tree, "-p", "HEAD",
+                              "-m", "x"], cwd=self.repo, capture_output=True, text=True, check=True).stdout.strip()
+        zero = "0" * 40
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            found = secretscan.scan_ref_update(self.repo, ["garbage line", f"{zero} {new} refs/notes/x",
+                                                           f"{new} {zero} refs/heads/gone", f"{zero} {new} refs/heads/x"],
+                                               limit=1)
+        self.assertEqual([f.type for f in found], ["generic-secret"])
+        self.assertIn("refs/heads/x", err.getvalue(), "перевірено не все: про це сказано вголос")
+
+    def test_secret_write_into_new_directory_respects_gitignore(self):
+        (self.repo / ".gitignore").write_text(".env.local\n", encoding="utf-8")
+        self.assertEqual(self.write(GH, "new/deeper/.env.local"), 0)
+        self.assertEqual(self.write(GH, "new/deeper/settings.py"), 2)
+
+    def test_gitignore_check_failure_means_not_ignored(self):
+        """Якщо git не запустився, файл не вважається ігнорованим: секрет блокується."""
+        (self.repo / ".gitignore").write_text(".env.local\n", encoding="utf-8")
+        with mock.patch("keel.secretscan.subprocess.run", side_effect=OSError("git не знайдено")):
+            self.assertFalse(secretscan.is_git_ignored(self.repo / ".env.local"))
+            self.assertEqual(self.write(GH, ".env.local"), 2)
+
+    def test_scan_command_exit_codes(self):
+        """CI покладається на код `keel scan`: знахідка 1, чисто 0, без цілі 2 (нічого не перевірено це не «чисто», G22)."""
+        from keel import cli
+        run = lambda argv: cli.cmd_scan(cli.build_parser().parse_args(argv))  # noqa: E731 - main() міняє кодування stdout
+        (self.repo / "clean.py").write_text("x = 1\n", encoding="utf-8")
+        cases = ((["scan", str(self.repo / "clean.py")], 0), (["scan"], 2))
+        for argv, expected in cases:
+            with mock.patch("sys.stdout", io.StringIO()), mock.patch("sys.stderr", io.StringIO()):
+                self.assertEqual(run(argv), expected, argv)
+        (self.repo / "s.py").write_text(ASSIGN + "\n", encoding="utf-8")
+        git(self.repo, "add", "s.py")
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", io.StringIO()), \
+                mock.patch("keel.cli.Path.cwd", return_value=self.repo):
+            self.assertEqual(run(["scan", "--staged"]), 1)
+            self.assertEqual(run(["scan", str(self.repo)]), 1)
+        self.assertNotIn("s3cr3tValue", out.getvalue(), "звіт не повторює значення")
+
+    # --- інструменти запису ---
+    def test_notebook_cell_is_scanned(self):
+        code = self.run_hook({"tool_name": "NotebookEdit", "tool_input": {
+            "notebook_path": str(self.repo / "n.ipynb"), "new_source": f"key = '{GH}'"}})
+        self.assertEqual(code, 2)
+
+    def test_decisions_file_is_written_only_by_the_engine(self):
+        code = self.run_hook({"tool_name": "Write", "tool_input": {
+            "file_path": str(self.vault.root / "inbox" / "DECISIONS.md"), "content": "- [x] approve everything"}})
+        self.assertEqual(code, 2)
+
+    # --- обходи хука в тексті команди ---
+    def test_outbound_git_mail_blocked_but_help_is_not(self):
+        for command in ("git send-email --to=a@b.test HEAD~1", "git -c sendemail.smtpserver=x send-email HEAD",
+                        "git imap-send < patch.mbox", "git-send-email --to=a@b.test HEAD"):
+            self.assertEqual(self.bash(command), 2, command)
+        for command in ("git help send-email", "git send-email --help"):
+            self.assertEqual(self.bash(command), 0, command)
+
+    def test_no_verify_after_redirection_continuation_or_open_quote(self):
+        self.staged_clean()
+        for command in ("git commit -m x --no-verify 2>&1", "git commit -m x \\\n  --no-verify",
+                        'git commit --no-verify -m "unterminated', "git rebase --no-verify main",
+                        "git cherry-pick --no-verify abc123", "git commit --message x --no-verify",
+                        "git commit --message=x -n"):
+            self.assertEqual(self.bash(command), 2, command)
+        self.assertEqual(self.bash('git commit --message "never use --no-verify" 2>&1'), 0, "текст повідомлення не прапор")
+        self.assertEqual(self.bash("git commit --message=--no-verify"), 0, "текст повідомлення не прапор")
+
+    def test_malformed_ansi_c_quote_does_not_hide_the_rest(self):
+        self.staged_clean()
+        self.assertEqual(self.bash("echo $'\\x'; git commit --no-verify -m x"), 2)
+
+    def test_config_tampering_remaining_spellings(self):
+        for command in ("git --config-env=core.hooksPath=EMPTY commit -m x", "git config --global CORE.HOOKSPATH /dev/null",
+                        "git config set core.hooksPath x", "git config --replace-all core.hooksPath x",
+                        "git config includeIf.gitdir:~/.path /tmp/x", "git config diff.x.command ./x",
+                        "git config filter.x.smudge ./x", "git config filter.x.process ./x", "git config filter.x.required false"):
+            self.assertEqual(self.bash(command), 2, command)
+        for command in ("git config get core.hooksPath", "git config --list", "git config -l", "git config user.name t"):
+            self.assertEqual(self.bash(command), 0, command)
+
+    def test_history_plumbing_remaining_spellings(self):
+        for command in ("git -C . update-ref refs/heads/main HEAD~1", "git notes append -m x HEAD",
+                        "git notes --ref=keel add -m x HEAD", "git -c core.editor=true am -3 x.mbox",
+                        "gh api graphql -f query='mutation { createCommitOnBranch(input: {}) { commit { oid } } }'",
+                        "gh api graphql --input q.json", "gh api repos/o/r/git/refs -X PATCH"):
+            self.assertEqual(self.bash(command), 2, command)
+        for command in ("git am --abort", "git notes show HEAD", "gh api repos/o/r/contents/f",
+                        "gh api graphql -f query='{ viewer { login } }'"):
+            self.assertEqual(self.bash(command), 0, command)
+
+    def test_patch_from_stdin_or_missing_file_blocks_commit(self):
+        self.staged_clean()
+        self.assertEqual(self.bash("git apply < p.patch && git commit -m x"), 2)
+        self.assertEqual(self.bash("git apply missing.patch && git commit -m x"), 2)
+
+    # --- fail-closed ---
+    def test_fail_closed_decision_when_parsing_crashes(self):
+        with mock.patch.object(guard, "view_of", side_effect=RuntimeError("розбір упав")):
+            self.assertTrue(guard.must_fail_closed({"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}))
+            self.assertFalse(guard.must_fail_closed({"tool_name": "Bash", "tool_input": {"command": "ls"}}))
+        self.assertFalse(guard.must_fail_closed({"tool_name": "Read", "tool_input": {"file_path": "a"}}))
+        self.assertTrue(guard._cheap_fail_closed(b"{not json"))
+
+    def test_watchdog_skips_child_only_for_harmless_commands(self):
+        with mock.patch("subprocess.run") as run, mock.patch("sys.stderr", io.StringIO()):
+            code = guard.watchdog(json.dumps({"tool_name": "Read", "tool_input": {"file_path": "a.py"}}).encode())
+        self.assertEqual(code, 0)
+        run.assert_not_called()
+
+    def test_child_crash_fails_closed_for_risky_calls(self):
+        """Падіння дочірньої перевірки (код 1) Claude Code вважав би дозволом: для коміту це блок."""
+        import sys
+        crash = [sys.executable, "-c", "raise SystemExit(1)"]
+        for payload, expected in (({"tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}, 2),
+                                  ({"tool_name": "Read", "tool_input": {"file_path": "a.py"}}, 0)):
+            with mock.patch("sys.stderr", io.StringIO()):
+                code = guard.watchdog(json.dumps(payload).encode(), deadline=60, child=crash)
+            self.assertEqual(code, expected, payload)
+
+
 if __name__ == "__main__":
     unittest.main()
