@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Наскрізний прогін на зібраному дистрибутиві. Без LLM, мережа жива (OSV, реєстри).
 Git ізольовано від машини: порожній глобальний і системний конфіг (хуки, alias, gpgsign власника не впливають).
 Запуск: python tests/e2e_local.py [--real-schedule]

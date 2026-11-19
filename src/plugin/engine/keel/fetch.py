@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Мережа для радара й перевірки фактів. TLS перевіряється завжди, вимкнути не можна:
 вузол, що підміняє відповідь, інакше сховав би вразливість від радара безпеки."""
 from __future__ import annotations

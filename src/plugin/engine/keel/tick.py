@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Щогодинний цикл. Ідемпотентний: строки обчислює зі стану, тож переживає сон ноутбука."""
 from __future__ import annotations
 

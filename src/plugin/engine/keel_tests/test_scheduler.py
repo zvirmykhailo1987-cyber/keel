@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Планувальник без справжньої реєстрації: зовнішні команди підмінені."""
 import os
 import subprocess

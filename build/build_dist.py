@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Збирає дистрибутив Keel: dist/keel-marketplace/ і ZIP із тих самих файлів.
 
 Нічого не публікує. Будь-який збій зупиняє збірку й видаляє результат.

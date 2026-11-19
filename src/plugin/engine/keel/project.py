@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Підключення репозиторію. Спершу план і diff, зміни лише після явного --apply.
 Плагін не може задавати permissions (документація), тому їх пише ця команда за згодою людини."""
 from __future__ import annotations

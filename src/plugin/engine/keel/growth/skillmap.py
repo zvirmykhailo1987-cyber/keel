@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Карта розвитку розробника й інтервальне повторення (SM-2) без LLM.
 Рівень піднімається лише доказом: ретро, ревʼю, коміт. Самооцінка без доказу не приймається."""
 from __future__ import annotations

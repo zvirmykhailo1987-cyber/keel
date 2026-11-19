@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Файлові операції: атомарний запис, UTF-8 + LF, блокування без PID (G49)."""
 from __future__ import annotations
 

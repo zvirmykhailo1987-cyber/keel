@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Профілі стеків як дані: ознаки, команди, EOL-продукти, репозиторії для стеження."""
 from __future__ import annotations
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Єдиний шлях рушія до git. Білий список підкоманд: push і merge не існують як можливість.
 Тест AST перевіряє, що інших викликів git у рушії немає."""
 from __future__ import annotations

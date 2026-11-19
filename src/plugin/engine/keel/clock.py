@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Єдине джерело часу. KEEL_FAKE_NOW дозволяє тестувати випробування й каденси."""
 from __future__ import annotations
 

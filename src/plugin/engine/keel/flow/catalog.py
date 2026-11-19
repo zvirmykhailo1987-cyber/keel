@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Каталог дій. Перевіряється при завантаженні: помилка конфігурації зупиняє рушій, а не
 з'являється посеред ночі як KeyError під час дії."""
 from __future__ import annotations

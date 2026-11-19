@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Overlay, випробування, SM-2, підключення проєкту, pre-flight, doctor."""
 # secret-scan: ignore (тестові значення для перевірки гейта)
 import json

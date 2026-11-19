@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Журнал подій: лише дописування, місячні сегменти, знімки згорток.
 Старт не читає всю історію: згортка продовжує зі збереженої позиції."""
 from __future__ import annotations

@@ -99,4 +99,4 @@ Layout: `src/plugin/` is the plugin itself (hooks, `engine/keel` in pure Python,
 
 ## License
 
-[MIT](LICENSE) © 2026 Mykhailo Zvir
+[MIT](LICENSE) © 2026 Mykhailo Zvir. Keep the copyright notice in copies and derived work.

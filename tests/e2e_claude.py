@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Жива сесія Claude Code з плагіном із dist. Витрачає трохи квоти, модель haiku.
 
 Сесія ізольована від машини: свій CLAUDE_CONFIG_DIR (без користувацьких CLAUDE.md, навичок, агентів,

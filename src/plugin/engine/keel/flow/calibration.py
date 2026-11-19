@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Навчання на рішеннях людини: чесність джерел, калібрування впевненості, вимкнення правил.
 Лише згортка журналу, без LLM."""
 from __future__ import annotations

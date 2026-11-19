@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Патч-оновлення залежності в окремій гілці. Без злиття і, за замовчуванням, без запуску тестів:
 тести після оновлення виконують чужий код, тому це окремий дозвіл людини в project.toml."""
 from __future__ import annotations

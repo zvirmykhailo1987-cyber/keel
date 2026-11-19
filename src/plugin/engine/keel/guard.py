@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """PreToolUse-хук: секрети й стан Keel.
 
 Будь-який збій перевірки запису чи коміту стає блокуванням (код 2). Перевірений факт:

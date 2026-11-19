@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Self-tests of the Keel engine.
 
 Every test runs git with an empty global and system config: the owner's `core.hooksPath`,

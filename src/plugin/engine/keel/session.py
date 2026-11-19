@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """SessionStart: короткий pre-flight у контекст. Правила приходять із диска в кожну сесію (G26),
 тому плагіну не потрібен власний CLAUDE.md. Ліміт контексту 10 000 символів (документація)."""
 from __future__ import annotations

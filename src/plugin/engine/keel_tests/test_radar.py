@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Radar офлайн: lockfile кожного стеку, детект, чесність при збоях джерел."""
 import json
 import os

@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
 # Запускач Keel: знаходить Python 3.11+ і передає керування engine.
 # Якщо інтерпретатора немає, код 2 (для PreToolUse це блокування, а не тихий пропуск).
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

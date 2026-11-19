@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Автопілот і межі. Кожна межа має тут тест, що впаде, якщо її послабити."""
 import ast
 import json

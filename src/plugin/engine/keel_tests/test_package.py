@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Цілісність пакета: навички, агенти, команди й граблі посилаються на те, що існує."""
 import json
 import re

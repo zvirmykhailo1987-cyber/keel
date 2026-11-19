@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Сканер секретів. Секрет у git означає ротацію, тому помилка тут дорога в обидва боки:
 пропуск шкодить одразу, а хибні тривоги змушують гейт вимкнути (G21)."""
 from __future__ import annotations

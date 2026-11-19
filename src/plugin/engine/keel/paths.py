@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Де живуть дані. Vault окремо від плагіна: PLUGIN_ROOT змінюється з версією,
 PLUGIN_DATA зникає при деінсталяції, а знання людини мають пережити обидва випадки."""
 from __future__ import annotations

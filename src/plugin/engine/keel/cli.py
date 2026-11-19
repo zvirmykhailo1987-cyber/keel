@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Командний рядок рушія: `python -m keel <команда>`. Команди плагіна викликають саме його."""
 from __future__ import annotations
 

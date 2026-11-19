@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mykhailo Zvir
+
 """Один інтерфейс над schtasks, launchd і cron: plan, apply, remove, verify.
 
 Завдання викликає стабільний shim у vault, бо шлях плагіна змінюється з кожною версією.
