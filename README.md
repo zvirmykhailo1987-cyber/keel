@@ -88,10 +88,14 @@ Off by default: background LLM runs, the scheduler, dependency autoupdates, and 
 
 ```
 sh src/plugin/hooks/run.sh -m keel selftest      # engine self-tests (stdlib unittest)
+python -m coverage run -m keel selftest && python -m coverage combine && python -m coverage report   # needs PYTHONPATH=src/plugin/engine
+python tests/mutation_check.py                   # inject bugs into guard and scanner, expect every one caught
 python tests/e2e_local.py                        # end-to-end on the built dist, live network, no LLM
 python tests/e2e_claude.py                       # live Claude Code session with an isolated profile (uses a little quota)
 KEEL_DENYLIST=/path/to/denylist.txt python build/build_dist.py   # release ZIP + dist/BUILD-REPORT.md
 ```
+
+**268 tests · 86.6% line+branch coverage · 20/20 injected bugs caught.** Coverage is measured in CI (Ubuntu, Python 3.13) with coverage.py, a dev-only tool; the plugin itself stays stdlib-only at runtime. Branch coverage is included, and so are the child Python processes the tests start (the guard watchdog, git hooks, the session hook, the tick shim) via `patch = subprocess` in `.coveragerc`. Not counted: `sh` code in `run.sh` and the hook shims, and `tests/e2e_*.py` (they exercise the built dist with live network and are not part of the gate). The CI job fails below 86% (the measured number rounded down). Coverage only says a line ran, so `python tests/mutation_check.py` also breaks the guard and the scanner on purpose (each mutation removes one detection or block) and checks that a self-test fails; results are in [docs/mutation-results.json](docs/mutation-results.json).
 
 The self-tests run git with an empty global and system config, so the results do not depend on the machine. The build refuses to run without a private denylist of personal markers and checks both the distribution and every file tracked in this repository against it; the report records counts and SHA-256 of every shipped file.
 
